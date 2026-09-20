@@ -1,4 +1,4 @@
-<view class="detail-page">
+<view class="detail-page" aria-hidden="{{showManage || showRules || showCards || showExpected || showGuide}}">
   <view wx:if="{{loading && !detail}}" class="state-block">正在加载活动…</view>
   <view wx:elif="{{error}}" class="state-block"><text>{{error}}</text><button class="button secondary" bindtap="retry">重新加载</button></view>
   <block wx:elif="{{detail && view}}">
@@ -12,7 +12,7 @@
 
     <view class="entry-panel">
       <view class="entry-heading"><text>参与入口</text><text wx:if="{{view.activity.entrance.verifiedAt}}" class="entry-verified">已核验</text></view>
-      <view class="entry-body"><view class="entry-description"><text class="entry-title">{{view.activity.entrance.label || '银行活动入口'}}</text><text class="entry-instructions">{{view.activity.entrance.instructions || '请先核对银行规则与参与资格。'}}</text></view><button class="entry-open" bindtap="entrance">{{view.entryAction}}</button></view>
+      <view class="entry-body"><view class="entry-description"><text class="entry-title">{{view.activity.entrance.label || '银行活动入口'}}</text><text class="entry-instructions">{{view.activity.entrance.instructions || '请先核对银行规则与参与资格。'}}</text></view><button class="entry-open {{detail.participation ? 'is-secondary' : ''}}" bindtap="entrance">{{view.entryAction}}</button></view>
       <view wx:if="{{view.entryImages.length}}" class="entry-extras"><button class="entry-image-link" bindtap="openGuide"><image wx:if="{{view.entryImages[0].url}}" src="{{view.entryImages[0].url}}" mode="aspectFill" aria-hidden="true"/><text>入口截图 · {{view.entryImages.length}} 张</text><text aria-hidden="true">›</text></button></view>
     </view>
 
@@ -22,8 +22,8 @@
       <text wx:if="{{selectedCardName}}" class="progress-help">{{selectedCardName}}</text>
       <progress wx:if="{{view.showProgress}}" percent="{{view.progressPercent}}" stroke-width="4" activeColor="#568be5" backgroundColor="#e8eef8" aria-label="活动完成进度"/>
       <text wx:if="{{!view.finished && detail.participation.stage !== 'skipped'}}" class="progress-help">{{view.progressHelp}}{{detail.participation.registeredAt && detail.participation.progress > 0 ? ' · 已报名' : ''}}</text>
-      <button wx:if="{{detail.participation.stage === 'completed'}}" class="date-setting" bindtap="openExpected"><text>{{detail.participation.expectedOn ? '预计 ' + detail.participation.expectedOn + ' 到账' : '设置预计到账日'}}</text><text aria-hidden="true">›</text></button>
-      <text wx:elif="{{detail.participation.stage === 'received'}}" class="progress-help">{{detail.participation.receivedOn}} 到账 · 计入 {{view.receivedMonth}}收益</text>
+      <button wx:if="{{detail.participation.stage === 'completed' && !view.benefit.isDiscount}}" class="date-setting" bindtap="openExpected"><text>{{detail.participation.expectedOn ? '预计 ' + detail.participation.expectedOn + ' 到账' : '设置预计到账日'}}</text><text aria-hidden="true">›</text></button>
+      <text wx:elif="{{detail.participation.stage === 'received'}}" class="progress-help">{{detail.participation.receivedOn}} {{view.benefit.dateEvent}} · 计入 {{view.receivedMonth}}{{view.benefit.isDiscount ? '已享优惠' : '返现到账'}}</text>
       <text wx:elif="{{detail.participation.stage === 'skipped'}}" class="progress-help">仅跳过这一期，历史记录和后续周期保留。</text>
     </view>
     <view wx:else class="join-panel"><view><text class="join-title">准备参加？加入待办</text><text class="join-help">{{view.activity.frequency === 'once' ? '保存活动，随时记录进度' : '每期独立记录，历史会一直保留'}}</text></view><button class="join-button" bindtap="join" disabled="{{busy}}" loading="{{busy}}">加入待办</button></view>
@@ -32,50 +32,50 @@
     <view class="participation-rules"><view class="rules-heading"><text class="section-title">怎么参加</text><button class="text-button" bindtap="openRules">完整规则</button></view><text class="conditions">{{view.activity.conditions}}</text><text wx:if="{{view.activity.requiresRegistration}}" class="rules-note">需先在银行完成报名，再按规则消费。</text><text wx:if="{{view.activity.requiresInvitation}}" class="rules-note">仅限受邀用户，请先核对活动资格。</text><text wx:if="{{view.activity.scope === 'card'}}" class="rules-note">每张卡单独计算进度与收益。</text></view>
     <button wx:if="{{detail.participation || detail.history.length}}" class="history-link" bindtap="openHistory"><text>参与记录</text><text>查看全部　›</text></button>
     <button wx:if="{{detail.participation && !view.finished && detail.participation.stage !== 'skipped'}}" class="reminder-link" bindtap="reminder">开启本期截止提醒</button>
-    <button wx:if="{{detail.participation.stage === 'completed' && detail.participation.expectedOn}}" class="reminder-link" bindtap="reminder">开启预计到账提醒</button>
+    <button wx:if="{{detail.participation.stage === 'completed' && detail.participation.expectedOn && !view.benefit.isDiscount}}" class="reminder-link" bindtap="reminder">开启预计到账提醒</button>
   </block>
 </view>
 
-<view wx:if="{{detail && !error}}" class="detail-bottom-bar">
-  <block wx:if="{{detail.participation.stage === 'received'}}"><button class="button secondary" bindtap="openHistory">查看记录</button><button class="button primary" bindtap="receipt" disabled="{{busy}}">修改到账</button></block>
+<view wx:if="{{detail && !error}}" class="detail-bottom-bar" aria-hidden="{{showManage || showRules || showCards || showExpected || showGuide}}">
+  <block wx:if="{{detail.participation.stage === 'received'}}"><button class="button secondary" bindtap="openHistory">查看记录</button><button class="button primary" bindtap="receipt" disabled="{{busy}}">{{view.benefit.editAction}}</button></block>
   <block wx:elif="{{detail.participation.stage === 'skipped'}}"><button class="button secondary" bindtap="openHistory">查看记录</button><button class="button primary" bindtap="resume" disabled="{{busy}}" loading="{{busy}}">恢复参加</button></block>
-  <block wx:elif="{{detail.participation.stage === 'completed'}}"><button class="button secondary" bindtap="openExpected">预计到账日</button><button class="button primary" bindtap="receipt" disabled="{{busy}}">确认到账</button></block>
-  <block wx:else><button class="button primary" bindtap="complete" disabled="{{busy}}" loading="{{busy}}">标记完成</button><button class="button secondary" bindtap="receipt" disabled="{{busy}}">记到账</button></block>
+  <block wx:elif="{{detail.participation.stage === 'completed'}}"><button wx:if="{{!view.benefit.isDiscount}}" class="button secondary" bindtap="openExpected">预计到账日</button><button wx:else class="button secondary" bindtap="openHistory">查看记录</button><button class="button primary" bindtap="receipt" disabled="{{busy}}">{{view.benefit.recordAction}}</button></block>
+  <block wx:else><button class="button primary" bindtap="complete" disabled="{{busy}}" loading="{{busy}}">标记完成</button><button class="button secondary" bindtap="receipt" disabled="{{busy}}">{{view.benefit.recordAction}}</button></block>
 </view>
 
-<app-sheet show="{{showCards}}" title="用哪张卡参加？" bindclose="closeCards">
+<app-sheet id="detail-card-picker" show="{{showCards}}" title="用哪张卡参加？" bindclose="closeCards">
   <text class="sheet-caption">这个活动按卡计算。请选择实际使用的卡片。</text>
   <view class="card-options"><button wx:for="{{cards}}" wx:key="id" class="card-option {{selectedCardId === item.id ? 'is-selected' : ''}}" data-id="{{item.id}}" bindtap="chooseCard" aria-pressed="{{selectedCardId === item.id}}"><view class="card-option-text"><text class="card-option-title">{{item.name}}</text><text class="card-option-description">{{item.issuer}}</text><text class="card-qualification">{{item.qualification}}</text></view><text class="selection-mark">{{selectedCardId === item.id ? '✓' : ''}}</text></button></view>
   <text wx:if="{{!cards.length}}" class="sheet-caption">卡包里还没有这家银行的卡片，请先添加。</text>
   <text wx:if="{{cardSelectionError}}" class="field-error">{{cardSelectionError}}</text>
-  <button wx:if="{{cards.length}}" class="button primary sheet-confirm" bindtap="confirmCard">继续{{pendingAction === 'join' ? '加入待办' : pendingAction === 'complete' ? '标记完成' : '记录到账'}}</button>
+  <button wx:if="{{cards.length}}" class="button primary sheet-confirm" bindtap="confirmCard">继续{{pendingAction === 'join' ? '加入待办' : pendingAction === 'complete' ? '标记完成' : view.benefit.recordAction}}</button>
   <button class="text-button sheet-wide" bindtap="addCard">添加一张卡片</button>
 </app-sheet>
 
-<app-sheet show="{{showRules}}" title="活动规则" bindclose="closeRules">
+<app-sheet id="detail-rules" show="{{showRules}}" title="活动规则" bindclose="closeRules">
   <view class="full-rules"><text class="rule-title">{{view.activity.title}}</text><text class="rule-label">适用卡片</text><text>{{view.activity.cardDescription}}</text><text class="rule-label">发卡机构</text><text>{{view.issuerNames}}</text><text class="rule-label">参与要求</text><text>{{view.activity.conditions}}</text><text class="rule-label">活动时间</text><text>{{view.activity.startsOn}} 至 {{view.activity.endsOn}}</text><text class="rule-label">次数与周期</text><text>{{view.frequencyLabel}} · {{view.activity.scope === 'card' ? '每张卡单独计算' : '每位用户计算'}}</text><text class="rule-label">规则来源</text><text>{{view.activity.sourceNote || '以银行官方活动规则为准'}}</text><button wx:if="{{view.activity.sourceUrl}}" class="button secondary" bindtap="source">复制银行规则链接</button></view>
 </app-sheet>
 
-<app-sheet show="{{showGuide}}" title="参与指引" bindclose="closeGuide">
+<app-sheet id="detail-guide" show="{{showGuide}}" title="参与指引" bindclose="closeGuide">
   <text class="guide-instructions">{{view.activity.entrance.instructions}}</text>
   <view wx:for="{{view.entryImages}}" wx:key="id" class="guide-item"><button class="guide-image-button" bindtap="previewImage" data-index="{{index}}" aria-label="放大查看第 {{index + 1}} 张入口截图"><image wx:if="{{item.url}}" src="{{item.url}}" mode="widthFix" class="guide-image"/><text wx:else class="sheet-caption">点击查看第 {{index + 1}} 张入口截图</text></button><text wx:if="{{item.url}}" class="sheet-caption">点击图片可放大查看</text></view>
   <text wx:if="{{!view.entryImages.length}}" class="sheet-caption">这项活动暂未提供入口截图，可按上方路径前往银行应用。</text>
 </app-sheet>
 
-<app-sheet show="{{showExpected}}" title="预计到账日" bindclose="closeExpected">
-  <text class="sheet-caption">可以跨月设置。活动完成后会一直保留在待到账中。</text>
+<app-sheet id="detail-expected" show="{{showExpected}}" title="预计到账日" bindclose="closeExpected">
+  <text class="sheet-caption">可以跨月设置。返现到账前会一直保留在收益页的待确认列表中。</text>
   <picker mode="date" value="{{expectedOn}}" start="{{detail.participation.startsOn}}" bindchange="changeExpected"><view class="date-input"><text>{{expectedOn || '选择预计到账日期'}}</text><text aria-hidden="true">›</text></view></picker>
   <text wx:if="{{expectedError}}" class="field-error">{{expectedError}}</text>
   <button class="button primary sheet-confirm" bindtap="saveExpected" loading="{{busy}}" disabled="{{busy}}">保存</button>
   <button wx:if="{{expectedOn}}" class="text-button sheet-wide" bindtap="clearExpected">清除日期</button>
 </app-sheet>
 
-<app-sheet show="{{showManage}}" title="管理活动" bindclose="closeManage">
+<app-sheet id="detail-manage" show="{{showManage}}" title="管理活动" bindclose="closeManage">
   <button wx:if="{{view.activity.scope === 'card' && !view.isPast}}" class="sheet-option" bindtap="anotherCard" disabled="{{busy}}"><view><text class="option-title">用另一张卡参加</text><text class="option-help">每张卡独立保留进度与收益</text></view><text aria-hidden="true">›</text></button>
   <button wx:if="{{detail.participation.stage !== 'completed' && detail.participation.stage !== 'received' && detail.participation.stage !== 'skipped'}}" class="sheet-option" bindtap="skip" disabled="{{busy}}"><view><text class="option-title">本期不参加</text><text class="option-help">只跳过这一期，后续仍会继续</text></view><text aria-hidden="true">›</text></button>
   <button wx:if="{{detail.participation.stage === 'completed'}}" class="sheet-option" bindtap="undoComplete" disabled="{{busy}}"><view><text class="option-title">撤销完成</text><text class="option-help">恢复完成之前的参与状态</text></view><text aria-hidden="true">›</text></button>
-  <button wx:if="{{detail.participation.stage === 'received'}}" class="sheet-option danger" bindtap="revokeReceipt" disabled="{{busy}}"><view><text class="option-title">撤销到账</text><text class="option-help">移除收益，恢复为待到账</text></view><text aria-hidden="true">›</text></button>
-  <button wx:if="{{detail.tracking.enabled && view.activity.frequency !== 'once'}}" class="sheet-option" bindtap="untrack" disabled="{{busy}}"><view><text class="option-title">停止后续周期追踪</text><text class="option-help">本期、待到账和历史记录都会保留</text></view><text aria-hidden="true">›</text></button>
+  <button wx:if="{{detail.participation.stage === 'received'}}" class="sheet-option danger" bindtap="revokeReceipt" disabled="{{busy}}"><view><text class="option-title">{{view.benefit.revokeAction}}</text><text class="option-help">移除{{view.benefit.actualLabel}}金额，恢复为{{view.benefit.pendingStatus}}</text></view><text aria-hidden="true">›</text></button>
+  <button wx:if="{{detail.tracking.enabled && view.activity.frequency !== 'once'}}" class="sheet-option" bindtap="untrack" disabled="{{busy}}"><view><text class="option-title">停止后续周期追踪</text><text class="option-help">本期、待确认和历史记录都会保留</text></view><text aria-hidden="true">›</text></button>
   <button wx:if="{{detail.tracking && !detail.tracking.enabled && view.activity.frequency !== 'once' && !view.isPast}}" class="sheet-option" bindtap="join" disabled="{{busy}}"><view><text class="option-title">恢复后续周期追踪</text><text class="option-help">下个周期继续生成待办</text></view><text aria-hidden="true">›</text></button>
   <button class="sheet-option" bindtap="openHistory"><view><text class="option-title">参与与操作记录</text><text class="option-help">查看各期结果和本期修改记录</text></view><text aria-hidden="true">›</text></button>
 </app-sheet>

@@ -109,7 +109,8 @@ export async function ensureBills(ctx: Context, limit = 20, accountId?: string):
 }
 
 export async function getWallet(ctx: Context): Promise<Wallet> {
-  const cards = (await ownedCards(ctx)).filter(card => !card.archivedAt);
+  // Historical records still need the identity of cards removed from the active wallet.
+  const cards = await ownedCards(ctx);
   const accounts = await ctx.store.find<BillingAccount>('billing_accounts', { where: [{ field: 'ownerId', op: 'eq', value: ctx.actor.userId }] });
   const bills = await ctx.store.find<Bill>('bills', { where: [{ field: 'ownerId', op: 'eq', value: ctx.actor.userId }] });
   cards.sort((left, right) => right.createdAt.localeCompare(left.createdAt) || left.id.localeCompare(right.id));

@@ -1,4 +1,4 @@
-import { ActivityDraft, Entrance } from '../shared/contracts';
+import { ActivityDraft, ActivityLead, Entrance } from '../shared/contracts';
 import { assertDate } from './calendar';
 import { DomainError } from './errors';
 import { banks, issuers } from '../shared/catalog';
@@ -79,6 +79,18 @@ export function validatePublicHttps(value: unknown, field = 'sourceUrl', require
   return url;
 }
 
+export function validateLead(input: unknown): ActivityLead {
+  const source = object(input, 'lead');
+  const bankId = id(source.bankId, 'bankId');
+  if (!banks.some(bank => bank.id === bankId)) fail('bankId', '请选择有效银行');
+  const sourceUrl = validatePublicHttps(source.sourceUrl, 'sourceUrl', false);
+  const sourceNote = text(source.sourceNote, 'sourceNote', 500);
+  const imageIds = list(source.imageIds, 'imageIds', 6).map(value => id(value, 'imageIds'));
+  if (new Set(imageIds).size !== imageIds.length) fail('imageIds', '请移除重复图片');
+  if (!sourceUrl && !sourceNote && !imageIds.length) fail('sourceNote', '请提供来源链接、银行 App 路径说明或规则截图');
+  return { title: text(source.title, 'title', 60, true), bankId, sourceUrl, sourceNote, imageIds };
+}
+
 function validateEntrance(value: unknown, publish: boolean): Entrance {
   const source = object(value, 'entrance');
   const kind = choice(source.kind, ['guide', 'web', 'miniprogram'] as const, 'entrance.kind');
@@ -141,7 +153,7 @@ export function validateDraft(input: unknown, publish = false): ActivityDraft {
     target: targetValue(source.target, unit),
     unit,
     currency: choice(source.currency, ['CNY', 'HKD', 'MOP'] as const, 'currency'),
-    rewardMinor: integer(source.rewardMinor, 0, 100000000000, 'rewardMinor'),
+    rewardMinor: integer(source.rewardMinor, publish ? 1 : 0, 100000000000, 'rewardMinor'),
     rewardKind: choice(source.rewardKind, ['cashback', 'discount'] as const, 'rewardKind'),
     scope: choice(source.scope, ['user', 'card'] as const, 'scope'),
     requiresRegistration: boolean(source.requiresRegistration, 'requiresRegistration'),

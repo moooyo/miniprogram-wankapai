@@ -3,9 +3,10 @@
   <view wx:if="{{error}}" class="feedback error" role="alert"><text>{{error}}</text><button class="text-button" bindtap="load">重试</button></view>
   <view wx:if="{{loading}}" class="loading">正在读取…</view>
   <block wx:else>
+    <view class="group"><button class="menu-row" bindtap="openHistory"><view class="menu-copy"><text class="menu-title">全部参与记录</text><text class="menu-description">查看往期参与、返现与优惠，按记录更正或恢复</text></view><text class="chevron" aria-hidden="true">›</text></button></view>
     <view class="group">
       <button class="menu-row" bindtap="openSubmissions"><view class="menu-copy"><text class="menu-title">我的投稿</text><text class="menu-description">{{returnedCount ? '有投稿需要补充' : pendingCount ? '有投稿等待审核' : '查看投稿与审核结果'}}</text></view><text class="chevron" aria-hidden="true">›</text></button>
-      <button class="menu-row" bindtap="openSubmission"><view class="menu-copy"><text class="menu-title">分享活动</text><text class="menu-description">提交规则和出处，核实后公开</text></view><text class="chevron" aria-hidden="true">›</text></button>
+      <button class="menu-row" bindtap="openSubmission"><view class="menu-copy"><text class="menu-title">分享活动线索</text><text class="menu-description">填写银行、标题和来源，运营补齐后公开</text></view><text class="chevron" aria-hidden="true">›</text></button>
     </view>
     <view class="group">
       <button class="menu-row" bindtap="openPreferences"><view class="menu-copy"><text class="menu-title">提醒设置</text><text class="menu-description">截止、待到账与信用卡还款</text></view><text class="chevron" aria-hidden="true">›</text></button>

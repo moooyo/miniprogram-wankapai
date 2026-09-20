@@ -44,8 +44,15 @@ export interface Activity extends ActivityDraft {
   id: string; revision: number; status: 'published' | 'withdrawn';
   publishedAt: string; updatedAt: string; publishedBy: string;
 }
+export interface ActivityLead {
+  title: string;
+  bankId: string;
+  sourceUrl: string;
+  sourceNote: string;
+  imageIds: string[];
+}
 export interface Submission {
-  id: string; ownerId: string; draft: ActivityDraft; status: SubmissionStatus;
+  id: string; ownerId: string; draft: ActivityDraft | null; lead?: ActivityLead; status: SubmissionStatus;
   reviewNote: string; createdAt: string; updatedAt: string; activityId?: string; version: number;
 }
 export interface Card {
@@ -100,9 +107,14 @@ export interface Detail {
   activity: Activity; participation: Participation | null; tracking: Tracking | null;
   history: Participation[]; audit: AuditEvent[]; assets: Asset[]; eligible: boolean;
 }
-export interface Dashboard { today: string; tasks: Participation[]; pendingRewards: Participation[]; bills: Bill[]; accounts: BillingAccount[]; }
+export interface Dashboard { today: string; tasks: Participation[]; pendingRewards: Participation[]; bills: Bill[]; accounts: BillingAccount[]; cards?: Card[]; }
 export interface Wallet { cards: Card[]; accounts: BillingAccount[]; bills: Bill[]; }
-export interface RewardsView { month: string; currency: Currency; totalMinor: number; pending: Participation[]; received: Reward[]; nextCursor: string | null; }
+export interface RewardsView {
+  month: string; currency: Currency; totalMinor: number; pending: Participation[]; received: Reward[]; nextCursor: string | null;
+  cards?: Card[]; cardIds?: Record<string, string>; pendingCounts?: Record<Currency, number>;
+  rewardKinds?: Record<string, ActivityDraft['rewardKind']>;
+  cashbackMinor?: number; discountMinor?: number;
+}
 
 export interface Queries {
   'session.get': { input: Record<string, never>; output: Session };
@@ -132,6 +144,7 @@ export interface Commands {
   'card.remove': { id: string };
   'bill.update': { id: string; dueOn?: string; paid?: boolean };
   'submission.save': { id?: string; draft: ActivityDraft; expectedVersion?: number };
+  'submission.lead.save': { id?: string; lead: ActivityLead; expectedVersion?: number };
   'submission.review': { id: string; decision: 'publish' | 'return'; draft?: ActivityDraft; reviewNote?: string; sourceVerified?: boolean; expectedVersion?: number };
   'activity.withdraw': { activityId: string };
   'preferences.save': { newActivities: boolean; deadlines: boolean; rewards: boolean; repayments: boolean };

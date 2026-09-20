@@ -1,6 +1,8 @@
 page { --brand:#1f61d8; --ink:#172230; --muted:#626f82; --line:#e5ebf3; --surface:#fff; --page:#f4f7fb; color:var(--ink); background:var(--page); font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif; font-size:16px; line-height:1.55; }
 view,text,button,input,textarea,picker,scroll-view { box-sizing:border-box; }
 button { font-size:14px; font-weight:500; line-height:1.5; border-radius:9px; min-height:48px; display:flex; align-items:center; justify-content:center; padding:10px 15px; margin:0; }
+/* Override the native v2 button size while preserving page-specific widths. */
+button:not([size=mini]) { width:auto; margin:0; }
 button::after { border:0; }
 button[disabled] { opacity:.45; }
 .page { padding:16px 16px 28px; }

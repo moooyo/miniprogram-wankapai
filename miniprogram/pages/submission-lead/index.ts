@@ -1,0 +1,300 @@
+import { api, ensureSession, uploadImage, previewAssets } from '../../services/api';
+import type { ActivityLead, Asset, Submission } from '../../../shared/contracts';
+import { banks } from '../../../shared/catalog';
+import { validatePublicHttps } from '../../../domain/validation';
+import { loadDraft, saveDraft, removeDraft, getDraftRevision, confirmDraftRecovery } from '../../services/form-draft';
+
+type LeadField = keyof ActivityLead;
+type InputEvent = { currentTarget: { dataset: { field?: string; id?: string } }; detail: { value: string } };
+type SavedLeadInput = { lead: ActivityLead };
+type DraftContext = { ownerId: string; entityId: string; revision: string | null; generation: number };
+const draftScope = 'submission-lead';
+const leadFields: LeadField[] = ['title', 'bankId', 'sourceUrl', 'sourceNote', 'imageIds'];
+
+function freshLead(bankId = ''): ActivityLead {
+  return { title: '', bankId, sourceUrl: '', sourceNote: '', imageIds: [] };
+}
+function isSavedInput(value: SavedLeadInput): boolean {
+  const lead = value?.lead;
+  return !!lead && ['title', 'bankId', 'sourceUrl', 'sourceNote'].every(field => typeof lead[field as keyof ActivityLead] === 'string')
+    && Array.isArray(lead.imageIds) && lead.imageIds.every(id => typeof id === 'string');
+}
+function messageOf(error: unknown, fallback: string): string {
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === 'object') {
+    if ('message' in error && typeof error.message === 'string') return error.message;
+    if ('errMsg' in error && typeof error.errMsg === 'string') return error.errMsg;
+  }
+  return fallback;
+}
+
+Page({
+  disposed: false,
+  loadGeneration: 0,
+  imageGeneration: 0,
+  draftBaseVersion: null as number | null,
+  data: {
+    loading: true, ready: false, saving: false, submitted: false, reloading: false, uploading: false, loadingImages: false,
+    denied: false, readOnly: false, fullSubmission: false, conflict: false, dirty: false, error: '', imageError: '', localDraftStatus: '',
+    submissionId: '', submission: null as Submission | null, ownerId: '',
+    lead: freshLead(), errors: {} as Partial<Record<LeadField, string>>,
+    bankOptions: [{ id: '', name: '请选择银行' }, ...banks], bankIndex: 0,
+    assets: [] as Asset[], assetUrls: [] as { id: string; url: string }[],
+    imageRows: [] as { id: string; label: string; url: string }[],
+  },
+  onLoad(options: { id?: string; bankId?: string }) {
+    this.setData({ submissionId: options.id || '', lead: freshLead(banks.some(bank => bank.id === options.bankId) ? options.bankId : '') });
+    void this.load();
+  },
+  onHide() { if (!this.disposed && !this.data.saving && !this.data.reloading) this.persistDraft(); },
+  onUnload() { this.disposed = true; this.loadGeneration++; this.imageGeneration++; },
+  async load() {
+    if (this.disposed || this.data.saving || this.data.submitted || this.data.reloading || this.data.uploading) return;
+    const generation = ++this.loadGeneration;
+    this.imageGeneration++;
+    this.setData({ loading: true, ready: false, denied: false, fullSubmission: false, error: '', loadingImages: false });
+    try {
+      const session = await ensureSession();
+      if (this.disposed || generation !== this.loadGeneration) return;
+      const submission = this.data.submissionId ? await api.query('submission.get', { id: this.data.submissionId }) : null;
+      if (this.disposed || generation !== this.loadGeneration) return;
+      if (submission && submission.ownerId !== session.userId) { this.setData({ denied: true }); return; }
+      if (submission && (!submission.lead || (submission.draft && submission.status !== 'published'))) {
+        this.setData({ submission, fullSubmission: true, error: '这份线索已补齐为完整活动稿件，请前往完整投稿页查看。' }); return;
+      }
+      this.applyLead(submission, session.userId);
+      if (!this.data.readOnly) {
+        const entityId = this.draftEntityId();
+        const saved = loadDraft<SavedLeadInput>(draftScope, session.userId, entityId);
+        const revision = getDraftRevision(draftScope, session.userId, entityId);
+        const recover = saved && isSavedInput(saved.value) && await confirmDraftRecovery(saved, this.draftBaseVersion);
+        if (this.disposed || generation !== this.loadGeneration) return;
+        if (saved && recover) {
+          const stale = saved.baseVersion !== this.draftBaseVersion;
+          this.draftBaseVersion = typeof saved.baseVersion === 'number' ? saved.baseVersion : null;
+          this.setData({ lead: saved.value.lead, dirty: true, conflict: stale, localDraftStatus: '已恢复本机草稿，尚未提交', error: stale ? '草稿基于旧版本，暂不能提交。请先复制需要保留的内容，再读取最新线索核对。' : '' });
+          wx.enableAlertBeforeUnload({ message: '草稿已保存在本机，尚未提交。' });
+        } else if (saved) removeDraft(draftScope, session.userId, entityId, revision);
+      }
+      this.syncOptions();
+      void this.loadImages();
+    } catch (error) {
+      if (!this.disposed && generation === this.loadGeneration) this.setData({ error: messageOf(error, '线索暂时无法读取，请重试。') });
+    } finally {
+      if (!this.disposed && generation === this.loadGeneration) this.setData({ loading: false });
+    }
+  },
+  applyLead(submission: Submission | null, ownerId: string) {
+    const lead = submission?.lead ? JSON.parse(JSON.stringify(submission.lead)) as ActivityLead : freshLead(this.data.lead.bankId);
+    const readOnly = submission?.status === 'published';
+    this.draftBaseVersion = submission?.version ?? null;
+    this.setData({ ready: true, ownerId, submission, lead, readOnly, fullSubmission: false, conflict: false, dirty: false, errors: {}, error: '', imageError: '', localDraftStatus: '', assets: [], assetUrls: [] });
+    this.syncOptions();
+    wx.setNavigationBarTitle({ title: readOnly ? '线索详情' : submission ? '修改活动线索' : '分享活动线索' });
+  },
+  syncOptions() {
+    this.setData({
+      bankIndex: Math.max(0, this.data.bankOptions.findIndex(bank => bank.id === this.data.lead.bankId)),
+      imageRows: this.data.lead.imageIds.map((id, index) => ({ id, label: `规则截图 ${index + 1}`, url: this.data.assetUrls.find(asset => asset.id === id)?.url || '' })),
+    });
+  },
+  draftEntityId(): string { return this.data.submissionId || 'new'; },
+  canEdit(): boolean { return !this.disposed && this.data.ready && !this.data.loading && !this.data.readOnly && !this.data.denied && !this.data.saving && !this.data.submitted && !this.data.reloading; },
+  draftContext(): DraftContext {
+    return { ownerId: this.data.ownerId, entityId: this.draftEntityId(), revision: getDraftRevision(draftScope, this.data.ownerId, this.draftEntityId()), generation: this.loadGeneration };
+  },
+  persistDraft(): boolean {
+    if (!this.canEdit() || !this.data.dirty) return false;
+    const saved = saveDraft<SavedLeadInput>(draftScope, this.data.ownerId, this.draftEntityId(), this.draftBaseVersion, { lead: this.data.lead });
+    this.setData({ localDraftStatus: saved ? '本机草稿已保存，尚未提交' : '草稿未能保存在本机，请勿关闭页面' });
+    return saved;
+  },
+  saveLocalDraft() {
+    if (!this.canEdit() || this.data.uploading) return;
+    this.setData({ dirty: true });
+    const saved = this.persistDraft();
+    wx.enableAlertBeforeUnload({ message: saved ? '草稿已保存在本机，尚未提交。' : '草稿未能保存在本机，离开可能丢失。' });
+    wx.showToast({ title: saved ? '草稿已保存在本机' : '草稿保存失败，请重试', icon: 'none' });
+  },
+  markDirty() {
+    if (!this.canEdit()) return;
+    this.setData({ dirty: true });
+    this.syncOptions();
+    const saved = this.persistDraft();
+    wx.enableAlertBeforeUnload({ message: saved ? '草稿已保存在本机，尚未提交。' : '草稿未能保存在本机，离开可能丢失。' });
+  },
+  input(event: InputEvent) {
+    if (!this.canEdit()) return;
+    const field = event.currentTarget.dataset.field;
+    if (!field || !['title', 'sourceUrl', 'sourceNote'].includes(field)) return;
+    this.setData({ [`lead.${field}`]: String(event.detail.value), [`errors.${field}`]: '', ...(this.data.conflict ? {} : { error: '' }) });
+    if (field === 'sourceUrl' || field === 'sourceNote') this.setData({ 'errors.sourceNote': '' });
+    this.markDirty();
+  },
+  selectBank(event: InputEvent) {
+    if (!this.canEdit()) return;
+    const bank = this.data.bankOptions[Number(event.detail.value)];
+    if (!bank) return;
+    this.setData({ 'lead.bankId': bank.id, 'errors.bankId': '', ...(this.data.conflict ? {} : { error: '' }) });
+    this.markDirty();
+  },
+  async addImage() {
+    if (!this.canEdit() || this.data.uploading) return;
+    if (this.data.lead.imageIds.length >= 6) { wx.showToast({ title: '最多添加 6 张图片', icon: 'none' }); return; }
+    const generation = this.loadGeneration;
+    this.setData({ uploading: true, imageError: '' });
+    try {
+      const asset = await uploadImage();
+      if (this.disposed || generation !== this.loadGeneration) return;
+      if (!this.data.lead.imageIds.includes(asset.id)) this.setData({ assets: [...this.data.assets, asset], 'lead.imageIds': [...this.data.lead.imageIds, asset.id], 'errors.imageIds': '', 'errors.sourceNote': '' });
+      this.markDirty();
+      await this.loadImages();
+    } catch (error) {
+      const message = messageOf(error, '图片上传失败，请重试。');
+      if (!this.disposed && generation === this.loadGeneration && !/cancel|取消/i.test(message)) this.setData({ imageError: message });
+    } finally {
+      if (!this.disposed && generation === this.loadGeneration) this.setData({ uploading: false });
+    }
+  },
+  removeImage(event: { currentTarget: { dataset: { id: string } } }) {
+    if (!this.canEdit() || this.data.uploading) return;
+    const id = event.currentTarget.dataset.id;
+    this.imageGeneration++;
+    this.setData({ 'lead.imageIds': this.data.lead.imageIds.filter(imageId => imageId !== id), assets: this.data.assets.filter(asset => asset.id !== id), assetUrls: this.data.assetUrls.filter(asset => asset.id !== id), loadingImages: false, imageError: '', 'errors.imageIds': '' });
+    this.markDirty();
+  },
+  async loadImages() {
+    if (this.disposed) return;
+    const generation = ++this.imageGeneration;
+    const ids = this.data.lead.imageIds.slice();
+    if (!ids.length) { this.setData({ assets: [], assetUrls: [], loadingImages: false, imageError: '' }); this.syncOptions(); return; }
+    this.setData({ loadingImages: true, imageError: '' });
+    try {
+      const [assets, assetUrls] = await Promise.all([api.query('assets.get', { ids }), api.query('assets.urls', { ids })]);
+      if (this.disposed || generation !== this.imageGeneration) return;
+      this.setData({ assets, assetUrls });
+      this.syncOptions();
+    } catch (error) {
+      if (!this.disposed && generation === this.imageGeneration) this.setData({ imageError: messageOf(error, '图片暂时无法读取，请重试。') });
+    } finally {
+      if (!this.disposed && generation === this.imageGeneration) this.setData({ loadingImages: false });
+    }
+  },
+  async previewImage(event: { currentTarget: { dataset: { id: string } } }) {
+    if (this.disposed || this.data.loadingImages) return;
+    const generation = this.loadGeneration;
+    const id = event.currentTarget.dataset.id;
+    if (!this.data.assets.some(asset => asset.id === id)) await this.loadImages();
+    if (this.disposed || generation !== this.loadGeneration || !this.data.lead.imageIds.includes(id)) return;
+    const assets = this.data.lead.imageIds.map(imageId => this.data.assets.find(asset => asset.id === imageId)).filter((asset): asset is Asset => !!asset);
+    const index = assets.findIndex(asset => asset.id === id);
+    if (index < 0) { this.setData({ imageError: '这张图片暂时无法查看，请重试读取。' }); return; }
+    try { await previewAssets(assets, index); }
+    catch (error) { if (!this.disposed && generation === this.loadGeneration) this.setData({ imageError: messageOf(error, '图片暂时无法打开，请重试。') }); }
+  },
+  copySource() {
+    if (this.disposed) return;
+    const value = [this.data.lead.sourceUrl, this.data.lead.sourceNote].filter(Boolean).join('\n');
+    if (value) wx.setClipboardData({ data: value });
+  },
+  reject(field: LeadField, message: string): false {
+    this.setData({ [`errors.${field}`]: message, error: '请检查标出的内容，填写后重新提交。' }, () => {
+      if (!this.disposed) wx.pageScrollTo({ selector: `#field-${field}`, offsetTop: -12, duration: 180 });
+    });
+    return false;
+  },
+  validate(): ActivityLead | false {
+    const lead: ActivityLead = { ...this.data.lead, title: this.data.lead.title.trim(), sourceUrl: this.data.lead.sourceUrl.trim(), sourceNote: this.data.lead.sourceNote.trim(), imageIds: this.data.lead.imageIds.slice() };
+    const errors: Partial<Record<LeadField, string>> = {};
+    if (!lead.title || lead.title.length > 60) errors.title = '请填写 60 字以内的活动名称。';
+    if (!banks.some(bank => bank.id === lead.bankId)) errors.bankId = '请选择活动所属银行。';
+    if (lead.sourceUrl) {
+      try { validatePublicHttps(lead.sourceUrl); }
+      catch (error) { errors.sourceUrl = messageOf(error, '请填写完整的 HTTPS 公开网页地址。'); }
+    }
+    if (lead.sourceNote.length > 500) errors.sourceNote = '出处说明最多填写 500 字。';
+    if (!lead.sourceUrl && !lead.sourceNote && !lead.imageIds.length) errors.sourceNote = '请提供来源链接、银行 App 路径或规则截图中的至少一种。';
+    if (lead.imageIds.length > 6 || new Set(lead.imageIds).size !== lead.imageIds.length) errors.imageIds = '最多添加 6 张不重复的规则截图。';
+    this.setData({ errors });
+    const first = leadFields.find(field => errors[field]);
+    if (first) return this.reject(first, errors[first]!);
+    return lead;
+  },
+  async save() {
+    if (!this.canEdit() || this.data.uploading || this.data.conflict || this.data.fullSubmission) return;
+    this.setData({ error: '' });
+    const lead = this.validate();
+    if (!lead) return;
+    const context = this.draftContext();
+    const submissionId = this.data.submissionId;
+    const expectedVersion = this.data.submission?.version;
+    this.setData({ saving: true });
+    try {
+      await api.command('submission.lead.save', { ...(submissionId ? { id: submissionId, expectedVersion } : {}), lead });
+      this.finish(context);
+    } catch (error) {
+      if (!this.disposed && context.generation === this.loadGeneration) this.showFailure(error);
+    } finally {
+      if (!this.disposed && context.generation === this.loadGeneration) this.setData({ saving: false });
+    }
+  },
+  showFailure(error: unknown) {
+    if (this.disposed) return;
+    const code = error && typeof error === 'object' && 'code' in error ? error.code : '';
+    if (code === 'VERSION_CONFLICT' || code === 'IMMUTABLE' || code === 'INVALID_STATE') {
+      this.setData({ conflict: true, error: '线索内容或审核状态已更新。本次填写仍保留在页面中，请复制需要保留的内容，再读取最新线索核对。' }); return;
+    }
+    const field = error && typeof error === 'object' && 'field' in error && typeof error.field === 'string' ? error.field.replace(/^lead\./, '') as LeadField : undefined;
+    const message = messageOf(error, '提交未成功，你的填写内容已保留，请重试。');
+    if (field && leadFields.includes(field)) this.reject(field, message);
+    else this.setData({ error: message });
+  },
+  async reloadLatest() {
+    if (!this.canEdit() || this.data.uploading || !this.data.submissionId) return;
+    const context = this.draftContext();
+    this.setData({ reloading: true });
+    try {
+      const result = await wx.showModal({ title: '读取最新线索？', content: '当前未提交的修改会被最新线索替换。你可以先取消，复制需要保留的内容。', confirmText: '读取最新', cancelText: '继续编辑' });
+      if (this.disposed || context.generation !== this.loadGeneration || !result.confirm) return;
+      const submission = await api.query('submission.get', { id: context.entityId });
+      if (this.disposed || context.generation !== this.loadGeneration) return;
+      if (submission.ownerId !== context.ownerId) { this.setData({ error: '无法读取这份线索，当前填写内容已保留。请返回投稿列表查看。' }); return; }
+      if (!submission.lead || (submission.draft && submission.status !== 'published')) {
+        this.setData({ fullSubmission: true, conflict: true, error: '这份线索已补齐为完整活动稿件。当前填写内容已保留，请前往完整投稿页核对。' }); return;
+      }
+      removeDraft(draftScope, context.ownerId, context.entityId, context.revision);
+      wx.disableAlertBeforeUnload();
+      this.imageGeneration++;
+      this.applyLead(submission, context.ownerId);
+      void this.loadImages();
+    } catch (error) {
+      if (!this.disposed && context.generation === this.loadGeneration) this.setData({ error: `${messageOf(error, '最新线索暂时无法读取。')} 当前填写内容已保留，请重试。` });
+    } finally {
+      if (!this.disposed && context.generation === this.loadGeneration) this.setData({ reloading: false });
+    }
+  },
+  finish(context: DraftContext) {
+    removeDraft(draftScope, context.ownerId, context.entityId, context.revision);
+    if (this.disposed || context.generation !== this.loadGeneration) return;
+    this.setData({ dirty: false, submitted: true });
+    wx.disableAlertBeforeUnload();
+    wx.showToast({ title: '线索已提交审核', icon: 'success' });
+    wx.navigateBack({ delta: 1, fail: () => { if (!this.disposed && context.generation === this.loadGeneration) wx.redirectTo({ url: '/pages/submissions/index' }); } });
+  },
+  viewFullSubmission() {
+    if (this.disposed || !this.data.submissionId) return;
+    this.persistDraft();
+    wx.redirectTo({ url: `/pages/submission-edit/index?id=${encodeURIComponent(this.data.submissionId)}` });
+  },
+  fillFullRules() {
+    if (!this.canEdit() || this.data.uploading || this.data.submissionId) return;
+    this.setData({ dirty: true });
+    if (!this.persistDraft()) { this.setData({ error: '本机草稿暂时无法保存，当前填写内容已保留。请重试后再填写完整规则。' }); return; }
+    wx.navigateTo({ url: '/pages/submission-edit/index?fromLead=1' });
+  },
+  viewActivity() {
+    if (!this.disposed && this.data.submission?.activityId) wx.navigateTo({ url: `/pages/detail/index?id=${encodeURIComponent(this.data.submission.activityId)}` });
+  },
+  viewSubmissions() { if (!this.disposed) wx.redirectTo({ url: '/pages/submissions/index' }); },
+  goBack() { if (!this.disposed) wx.navigateBack({ delta: 1, fail: () => { if (!this.disposed) wx.redirectTo({ url: '/pages/submissions/index' }); } }); },
+});

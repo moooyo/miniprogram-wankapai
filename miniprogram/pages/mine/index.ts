@@ -26,7 +26,8 @@ Page({
     } finally { this.setData({ loading: false }); }
   },
   openSubmissions() { wx.navigateTo({ url: '/pages/submissions/index' }); },
-  openSubmission() { wx.navigateTo({ url: '/pages/submission-edit/index' }); },
+  openHistory() { wx.navigateTo({ url: '/pages/history/index' }); },
+  openSubmission() { wx.navigateTo({ url: '/pages/submission-lead/index' }); },
   openPreferences() { wx.navigateTo({ url: '/pages/preferences/index' }); },
   openReview() {
     if (this.data.session?.isModerator) wx.navigateTo({ url: '/pages/review/index' });

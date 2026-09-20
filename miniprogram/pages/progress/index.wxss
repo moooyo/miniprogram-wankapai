@@ -2,6 +2,7 @@
 .entry-context { padding: 8rpx 0 40rpx; border-bottom: 1rpx solid var(--border, #e2e7ee); }
 .entry-eyebrow { color: var(--muted, #657184); font-size: 26rpx; line-height: 1.5; }
 .entry-title { margin-top: 12rpx; font-size: 40rpx; font-weight: 600; line-height: 1.45; }
+.entry-card { margin-top: 16rpx; color: var(--muted, #657184); font-size: 26rpx; line-height: 1.6; }
 .entry-field { padding: 40rpx 0 24rpx; }
 .entry-label { display: block; font-size: 30rpx; font-weight: 500; line-height: 1.5; }
 .entry-input-line { display: flex; align-items: center; gap: 16rpx; padding: 16rpx 0; border-bottom: 2rpx solid var(--control, #8a97a8); }

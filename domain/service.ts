@@ -6,7 +6,7 @@ import { Collection, ServiceOptions, Store } from './store';
 import { Context, createContext } from './context';
 import { DomainError, requireValue } from './errors';
 import { addDays, assertDate, monthOf, periodFor, todayCN } from './calendar';
-import { validateDraft } from './validation';
+import { validateDraft, validateLead } from './validation';
 import { ensureBills, getWallet, removeCard, saveCard, updateBill } from './wallet';
 
 export { DomainError } from './errors';
@@ -178,10 +178,10 @@ async function materialize(store: Store, actor: Actor, today: string, now: strin
   }
 }
 
-async function validateAssets(ctx: Context, draft: ActivityDraft, ownerId: string, approve: boolean): Promise<void> {
-  for (const id of draft.entrance.imageIds) {
+async function validateAssets(ctx: Context, imageIds: string[], ownerId: string, approve: boolean, field = 'entrance.imageIds'): Promise<void> {
+  for (const id of imageIds) {
     const asset = await ctx.store.get<Asset>('assets', id);
-    requireValue(asset && (asset.ownerId === ownerId || (approve && ctx.actor.isModerator && asset.ownerId === ctx.actor.userId)), 'INVALID_ASSET', '入口图片无效，请重新上传', 'entrance.imageIds');
+    requireValue(asset && (asset.ownerId === ownerId || (approve && ctx.actor.isModerator && asset.ownerId === ctx.actor.userId)), 'INVALID_ASSET', '图片无效，请重新上传', field);
     if (approve && asset.status !== 'approved') await ctx.store.set('assets', id, { ...asset, status: 'approved' });
   }
 }
@@ -252,7 +252,7 @@ async function query(ctx: Context, action: string, payload: Record<string, unkno
   if (action === 'dashboard.get') {
     const all = await ctx.store.find<Participation>('participations', { where: ownerWhere(ctx.actor.userId), orderBy: [{ field: 'endsOn', direction: 'asc' }] });
     const wallet = await getWallet(ctx);
-    return { today: ctx.today, tasks: all.filter(record => (record.startsOn <= ctx.today && record.endsOn >= ctx.today) || isUnfinished(record)), pendingRewards: all.filter(record => record.stage === 'completed'), bills: wallet.bills.filter(bill => !bill.paidAt), accounts: wallet.accounts };
+    return { today: ctx.today, tasks: all.filter(record => (record.startsOn <= ctx.today && record.endsOn >= ctx.today) || isUnfinished(record)), pendingRewards: all.filter(record => record.stage === 'completed'), bills: wallet.bills.filter(bill => !bill.paidAt), accounts: wallet.accounts, cards: wallet.cards };
   }
   if (action === 'history.list') {
     const { offset, limit } = paging(payload);
@@ -267,8 +267,20 @@ async function query(ctx: Context, action: string, payload: Record<string, unkno
     requireValue(currencies.has(String(currency)), 'INVALID_INPUT', '请选择有效币种', 'currency');
     const { offset, limit } = paging(payload);
     const rewards = (await ctx.store.find<Reward>('rewards', { where: [...ownerWhere(ctx.actor.userId), { field: 'currency', op: 'eq', value: currency }], orderBy: [{ field: 'receivedOn', direction: 'desc' }, { field: 'id', direction: 'asc' }] })).filter(reward => !reward.reversedAt && reward.receivedOn.startsWith(`${month}-`));
-    const pending = (await ctx.store.find<Participation>('participations', { where: [...ownerWhere(ctx.actor.userId), { field: 'stage', op: 'eq', value: 'completed' }] })).filter(record => record.snapshot.currency === currency);
-    return { month, currency, totalMinor: rewards.reduce((sum, reward) => sum + reward.amountMinor, 0), pending, received: rewards.slice(offset, offset + limit), nextCursor: rewards.length > offset + limit ? String(offset + limit) : null };
+    const records = await ctx.store.find<Participation>('participations', { where: ownerWhere(ctx.actor.userId) });
+    const allPending = records.filter(record => record.stage === 'completed');
+    const pending = allPending.filter(record => record.snapshot.currency === currency);
+    const pendingCounts = { CNY: 0, HKD: 0, MOP: 0 };
+    allPending.forEach(record => { pendingCounts[record.snapshot.currency] += 1; });
+    const received = rewards.slice(offset, offset + limit);
+    const receivedIds = new Set(received.map(reward => reward.participationId));
+    const cardIds = Object.fromEntries(records.filter(record => record.cardId && receivedIds.has(record.id)).map(record => [record.id, record.cardId!]));
+    const recordKinds = new Map(records.map(record => [record.id, record.snapshot.rewardKind]));
+    const rewardKinds = Object.fromEntries(received.map(reward => [reward.participationId, recordKinds.get(reward.participationId) || 'cashback']));
+    const cashbackMinor = rewards.filter(reward => recordKinds.get(reward.participationId) !== 'discount').reduce((sum, reward) => sum + reward.amountMinor, 0);
+    const discountMinor = rewards.filter(reward => recordKinds.get(reward.participationId) === 'discount').reduce((sum, reward) => sum + reward.amountMinor, 0);
+    const cards = await ctx.store.find<Card>('cards', { where: ownerWhere(ctx.actor.userId) });
+    return { month, currency, totalMinor: rewards.reduce((sum, reward) => sum + reward.amountMinor, 0), cashbackMinor, discountMinor, rewardKinds, pending, received, nextCursor: rewards.length > offset + limit ? String(offset + limit) : null, cards, cardIds, pendingCounts };
   }
   if (action === 'submissions.list') {
     if (payload.moderation) assertModerator(ctx);
@@ -346,12 +358,12 @@ async function command(ctx: Context, action: string, payload: any, options: Serv
   if (action === 'reward.confirm') {
     const record = await resolveParticipation(ctx, payload);
     checkVersion(record, payload.expectedVersion);
-    requireValue(Number.isSafeInteger(payload.amountMinor) && payload.amountMinor >= 0 && payload.amountMinor <= 1e11, 'INVALID_INPUT', '请填写有效到账金额', 'amountMinor');
+    requireValue(Number.isSafeInteger(payload.amountMinor) && payload.amountMinor >= 0 && payload.amountMinor <= 1e11, 'INVALID_INPUT', record.snapshot.rewardKind === 'discount' ? '请填写有效优惠金额' : '请填写有效到账金额', 'amountMinor');
     const receivedOn = assertDate(payload.receivedOn, 'receivedOn');
-    requireValue(receivedOn >= record.startsOn && receivedOn <= ctx.today, 'INVALID_INPUT', '到账日期应在本期开始至今天之间', 'receivedOn');
+    requireValue(receivedOn >= record.startsOn && receivedOn <= ctx.today, 'INVALID_INPUT', record.snapshot.rewardKind === 'discount' ? '享受优惠日期应在本期开始至今天之间' : '到账日期应在本期开始至今天之间', 'receivedOn');
     const rewardId = `r_${stableId(ctx.actor.userId, record.id)}`;
     const previous = await ctx.store.get<Reward>('rewards', rewardId);
-    if (previous) requireValue(previous.ownerId === ctx.actor.userId && previous.participationId === record.id, 'CONFLICT', '到账记录标识冲突');
+    if (previous) requireValue(previous.ownerId === ctx.actor.userId && previous.participationId === record.id, 'CONFLICT', record.snapshot.rewardKind === 'discount' ? '优惠记录标识冲突' : '到账记录标识冲突');
     const reward: Reward = { id: rewardId, ownerId: ctx.actor.userId, participationId: record.id, title: record.snapshot.title, bankId: record.snapshot.bankId, activityPeriod: record.periodKey, currency: record.snapshot.currency, amountMinor: payload.amountMinor, receivedOn, reversedAt: null, version: (previous?.version || 0) + 1, createdAt: previous?.createdAt || ctx.now, updatedAt: ctx.now };
     await ctx.store.set('rewards', rewardId, reward);
     const result = await saveParticipation(ctx, record, { ...completed(record, ctx.now), stage: 'received', receivedOn, receivedMinor: payload.amountMinor }, previous && !previous.reversedAt ? 'reward.corrected' : 'reward.confirmed');
@@ -360,7 +372,7 @@ async function command(ctx: Context, action: string, payload: any, options: Serv
   }
   if (action === 'reward.revoke') {
     const record = await ctx.owned<Participation>('participations', payload.participationId);
-    requireValue(record.stage === 'received', 'INVALID_STATE', '当前记录尚未确认到账');
+    requireValue(record.stage === 'received', 'INVALID_STATE', record.snapshot.rewardKind === 'discount' ? '当前记录尚未登记已享优惠' : '当前记录尚未确认到账');
     const rewards = await ctx.store.find<Reward>('rewards', { where: [...ownerWhere(ctx.actor.userId), { field: 'participationId', op: 'eq', value: record.id }] });
     for (const reward of rewards.filter(row => !row.reversedAt)) {
       const revoked = { ...reward, reversedAt: ctx.now, version: reward.version + 1, updatedAt: ctx.now };
@@ -377,11 +389,24 @@ async function command(ctx: Context, action: string, payload: any, options: Serv
     requireValue(previous?.status !== 'published', 'IMMUTABLE', '已发布投稿不可修改，请重新提交新的活动线索');
     if (previous) requireValue(Number.isInteger(payload.expectedVersion) && payload.expectedVersion === previous.version, 'VERSION_CONFLICT', '投稿已更新，请刷新后重新编辑');
     const draft = validateDraft(payload.draft, false);
-    await validateAssets(ctx, draft, ctx.actor.userId, false);
+    await validateAssets(ctx, draft.entrance.imageIds, ctx.actor.userId, false);
     const id = previous?.id || ctx.newId('submission');
-    const submission: Submission = { id, ownerId: ctx.actor.userId, draft, status: 'pending', reviewNote: '', createdAt: previous?.createdAt || ctx.now, updatedAt: ctx.now, version: (previous?.version || 0) + 1 };
+    const submission: Submission = { id, ownerId: ctx.actor.userId, draft, ...(previous?.lead ? { lead: previous.lead } : {}), status: 'pending', reviewNote: '', createdAt: previous?.createdAt || ctx.now, updatedAt: ctx.now, version: (previous?.version || 0) + 1 };
     await ctx.store.set('submissions', id, submission);
     await ctx.audit(id, 'submission.saved', previous, submission);
+    return { id, version: submission.version };
+  }
+  if (action === 'submission.lead.save') {
+    const previous = payload.id ? await ctx.owned<Submission>('submissions', payload.id) : null;
+    requireValue(previous?.status !== 'published', 'IMMUTABLE', '已发布投稿不可修改，请重新提交新的活动线索');
+    requireValue(!previous || !previous.draft, 'INVALID_STATE', '这条投稿已有完整规则，请从完整投稿页面修改');
+    if (previous) requireValue(Number.isInteger(payload.expectedVersion) && payload.expectedVersion === previous.version, 'VERSION_CONFLICT', '投稿已更新，请刷新后重新编辑');
+    const lead = validateLead(payload.lead);
+    await validateAssets(ctx, lead.imageIds, ctx.actor.userId, false, 'imageIds');
+    const id = previous?.id || ctx.newId('submission');
+    const submission: Submission = { id, ownerId: ctx.actor.userId, lead, draft: null, status: 'pending', reviewNote: '', createdAt: previous?.createdAt || ctx.now, updatedAt: ctx.now, version: (previous?.version || 0) + 1 };
+    await ctx.store.set('submissions', id, submission);
+    await ctx.audit(id, 'submission.lead_saved', previous, submission);
     return { id, version: submission.version };
   }
   if (action === 'submission.review') {
@@ -400,7 +425,7 @@ async function command(ctx: Context, action: string, payload: any, options: Serv
     }
     requireValue(payload.sourceVerified === true, 'SOURCE_UNVERIFIED', '请核实银行官方来源及参与入口', 'sourceVerified');
     const draft = validateDraft(payload.draft || submission.draft, true);
-    await validateAssets(ctx, draft, submission.ownerId, true);
+    await validateAssets(ctx, draft.entrance.imageIds, submission.ownerId, true);
     const id = ctx.newId('activity');
     const activity: Activity = { ...draft, id, revision: 1, status: 'published', publishedAt: ctx.now, updatedAt: ctx.now, publishedBy: ctx.actor.userId, entrance: { ...draft.entrance, verifiedAt: ctx.now } };
     await ctx.store.set('activities', id, activity);

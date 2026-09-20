@@ -287,7 +287,9 @@ test('submission versions reject stale author edits and stale moderator decision
   await assert.rejects(f.command('submission.save', { id: original.id, expectedVersion: original.version, draft: draft({ title: 'Stale title' }) }), code('VERSION_CONFLICT'));
   await assert.rejects(f.command('submission.save', { id: original.id, draft: draft() }), code('VERSION_CONFLICT'));
   await assert.rejects(f.command('submission.review', { id: original.id, decision: 'publish', expectedVersion: original.version, sourceVerified: true }, moderator), code('VERSION_CONFLICT'));
-  assert.equal((await f.query<Submission>('submission.get', { id: original.id })).draft.title, 'Updated title');
+  const updatedSubmission = await f.query<Submission>('submission.get', { id: original.id });
+  assert.ok(updatedSubmission.draft);
+  assert.equal(updatedSubmission.draft.title, 'Updated title');
   const returned = await f.command('submission.review', { id: original.id, decision: 'return', expectedVersion: edited.version, reviewNote: '请补充参与条件' }, moderator);
   assert.equal(returned.version, 3);
   const resubmitted = await f.command('submission.save', { id: original.id, expectedVersion: returned.version, draft: draft({ title: 'Resubmitted title' }) });

@@ -4,21 +4,21 @@ A native WeChat Mini Program implementing the accepted blue-and-white design. It
 
 ## Current delivery
 
-- 15 native pages and 3 reusable components.
+- 16 native pages and 3 reusable components.
 - Native WXML/WXSS/TypeScript source, shared business logic, and two CloudBase functions.
 - A prebuilt `dist/` directory in the downloadable delivery archive, generated and verified on the designated remote environment. Git tracks source only; `dist/` is intentionally ignored.
 - Explicit, persistent demonstration mode with fictional activities. It makes no cloud calls or message deliveries.
 - Real cloud integration code, ownership checks, review authorization, immutable image storage, and a configurable reminder worker.
 
-No real AppID, CloudBase environment, operator account, or subscription template has been configured. No experience version has been uploaded, and no public release or real notification has been sent. The current WeChat developer tools and physical devices still need acceptance testing when an AppID becomes available.
+No production AppID, CloudBase environment, operator account, or subscription template has been configured. A local test-account demo has been opened in WeChat DevTools; its AppID is kept in the ignored private project configuration. No experience version has been uploaded, and no public release or real notification has been sent. Physical devices and real cloud integration still need acceptance testing.
 
 ## Open the demonstration
 
 For a Git checkout, generate `dist/` with `npm ci` followed by `npm run build` in the designated development/verification environment before importing the project. The original delivery archive already includes these build files. The working configuration remains in demonstration mode until real account details are supplied.
 
 1. Extract the delivery archive, or clone and build the repository, in a normal development folder.
-2. In WeChat developer tools, import the **project root containing `project.config.json`**. That file points to the included `dist/miniprogram/` and `dist/cloudfunctions/` folders.
-3. The supplied `touristappid` is a placeholder for the tool's visitor/test experience. If the installed tools require a test account instead, choose the test-account flow; do not insert another organization's AppID.
+2. Sign in to WeChat DevTools with WeChat and obtain your own Mini Program [test account](https://developers.weixin.qq.com/miniprogram/dev/devtools/sandbox.html). The committed `touristappid` is only a placeholder; guest mode is not the supported execution path.
+3. Put the test AppID in the root `project.private.config.json` as `{ "appid": "YOUR_TEST_APPID" }`, then import the **project root containing `project.config.json`**. The private file is ignored by Git and overrides shared configuration. The project points to `dist/miniprogram/` and `dist/cloudfunctions/`. If DevTools rewrites shared configuration during import, keep the personal AppID in the private file.
 4. Keep `miniprogram/runtime-config.js` in `mode: 'demo'`. The compiled copy in `dist/miniprogram/runtime-config.js` already matches it.
 5. Use the five tabs. The user page exposes a clearly labeled demonstration role switch so the submission/review flow can be tried without giving a production user moderator privileges.
 
@@ -30,7 +30,7 @@ Demonstration records are saved in the developer tool/device's own storage. Uplo
 2. Open the monthly task and change its progress. Mark an activity complete without registering first, then confirm or correct its actual receipt.
 3. Confirm a previous-period pending reward and check that its income month follows the actual receipt date.
 4. Add another card with an independent or explicitly shared billing account. Change the current bill's actual due date and mark or undo payment.
-5. Submit an activity with a source, entrance link/path, and image. Switch to the demonstration moderator, return it with a reason or publish it after verification, and inspect it from discovery.
+5. Share an activity lead with a bank, title, and source link, bank-app path, or screenshot. Switch to the demonstration moderator, complete the verified rules, and publish or return it. Unreviewed leads stay private.
 6. Confirm that single-step activities do not show an empty progress meter. Rules, management, and participation history use separate sheets.
 7. Reminder buttons in demonstration mode explain that no WeChat message is sent.
 
@@ -78,6 +78,12 @@ npm run build
 ```
 
 The delivered build passed TypeScript checking, 62 automated tests, dependency/route/resource checks, and an additional old official WXML/WXSS compiler pass. The latter is a syntax check, not a substitute for current developer tools or physical devices. See [Verification](docs/verification.md) for exact evidence and limits.
+
+For repeatable simulator acceptance, use `npm run test:ui` after enabling the DevTools CLI/HTTP service port and configuring a local test AppID. This builds the source, opens an isolated demo project, runs scripted interactions and layout assertions, and saves screenshots plus an HTML report under `.qa-native/ui-acceptance/`. It does not use computer-use automation. See [Scripted UI acceptance](docs/ui-acceptance.md) for prerequisites, isolation, and coverage limits. The local-verification authorization rule still applies.
+
+The subsequent [UI/UX remediation](docs/ui-ux-remediation.md) passed 109 automated tests and 22 SDK scenarios. It adds global history access, consistent card and reward identity, actionable bill reminders, guarded draft recovery, clearer validation, and improved visual hierarchy.
+
+The latest [product UX refinement](docs/product-ux-refinement.md) adds benefit-specific recording, prioritized todo actions, lightweight activity leads, readable card names, and preserved form context. All 148 automated tests, type checking, and the source build passed. Its expanded SDK run was interrupted by a closed DevTools connection, so complete UI acceptance of this version remains outstanding.
 
 ## Business guarantees
 

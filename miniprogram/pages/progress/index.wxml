@@ -8,12 +8,18 @@
     <view class="entry-context">
       <text class="entry-eyebrow">{{periodText}}</text>
       <view class="entry-title">{{title}}</view>
+      <view wx:if="{{cardName}}" class="entry-card">关联卡片 · {{cardName}}</view>
     </view>
-    <view wx:if="{{!editable}}" class="entry-notice">这期记录已归档为完成、到账或不参与。如需更正，请先返回详情调整状态。</view>
-    <view class="entry-field">
+    <view wx:if="{{!editable}}" class="entry-notice">这期记录的状态为「{{recordStatus}}」。如需更正，请先返回详情调整状态。</view>
+    <view wx:if="{{conflict || reapplyRequired}}" id="record-conflict" class="entry-notice">
+      <view>{{conflict ? '记录已更新，你的输入仍然保留。' : latestSummary}}</view>
+      <view wx:if="{{reapplyRequired}}">下方是你的填写内容，请核对后重新应用。</view>
+      <button wx:if="{{conflict}}" class="entry-secondary" bindtap="reloadLatest" loading="{{reloading}}" disabled="{{reloading}}">读取最新记录</button>
+    </view>
+    <view class="entry-field" id="progress-field">
       <label class="entry-label" for="progress">当前累计</label>
       <view class="entry-input-line {{progressError ? 'entry-input-invalid' : ''}}">
-        <input id="progress" class="entry-amount" type="digit" value="{{progressInput}}" bindinput="onProgressInput" disabled="{{busy || !editable}}" maxlength="16" aria-label="当前累计进度" placeholder="0" adjust-position="{{true}}" />
+        <input id="progress" class="entry-amount" type="digit" value="{{progressInput}}" bindinput="onProgressInput" disabled="{{busy || reloading || !editable}}" maxlength="16" aria-label="当前累计进度" placeholder="0" adjust-position="{{true}}" focus="{{focusField === 'progress'}}" />
         <text class="entry-unit">{{unit}}</text>
       </view>
       <view wx:if="{{progressError}}" class="entry-error" role="alert">{{progressError}}</view>
@@ -21,18 +27,19 @@
     </view>
     <checkbox-group wx:if="{{showRegistration}}" bindchange="onRegistrationChange" class="entry-registration">
       <label class="entry-check-label">
-        <checkbox value="registered" checked="{{registered}}" disabled="{{busy || !editable}}" color="#1768df" />
+        <checkbox value="registered" checked="{{registered}}" disabled="{{busy || reloading || !editable}}" color="#1768df" />
         <view>
           <view>已完成银行报名</view>
           <view class="entry-hint">如活动需要报名，可在这里记录</view>
         </view>
       </label>
     </checkbox-group>
-    <view class="entry-explanation">保存进度后，可在活动详情直接标记完成或确认到账。</view>
+    <view class="entry-explanation">保存进度后，可在活动详情直接标记完成或{{benefit.recordAction}}。</view>
     <view wx:if="{{formError}}" class="entry-form-error" role="alert">{{formError}}</view>
+    <view wx:if="{{draftNotice}}" class="entry-hint">{{draftNotice}}</view>
     <view class="entry-actions">
-      <button class="entry-secondary" bindtap="back" disabled="{{busy}}">取消</button>
-      <button class="entry-primary" bindtap="save" loading="{{busy}}" disabled="{{busy || !editable}}">{{busy ? '正在保存' : '保存进度'}}</button>
+      <button class="entry-secondary" bindtap="back" disabled="{{busy || reloading}}">返回</button>
+      <button class="entry-primary" bindtap="save" loading="{{busy}}" disabled="{{busy || reloading || conflict || !editable}}">{{busy ? '正在保存' : reapplyRequired ? '重新应用并保存' : '保存进度'}}</button>
     </view>
   </block>
 </view>

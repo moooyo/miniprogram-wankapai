@@ -1,15 +1,15 @@
 <view class="preferences-page">
-  <view class="page-heading"><text class="page-title">提醒设置</text><text class="page-description">选择需要跟进的事项。</text></view>
+  <view class="page-heading"><text class="page-title">提醒设置</text><text class="page-description">保存微信提醒偏好。站内待办会继续保留，每次微信消息还需单独授权。</text></view>
   <view wx:if="{{error}}" class="error"><text>{{error}}</text><button wx:if="{{!ready && !loading}}" class="text-button" bindtap="load">重试</button></view>
   <view wx:if="{{loading}}" class="loading">正在读取设置…</view>
   <block wx:elif="{{ready}}">
     <view class="settings-group">
       <label class="setting-row"><view class="setting-copy"><text class="setting-title">匹配到新活动</text><text class="setting-description">按卡包中的银行与卡片条件匹配新活动</text></view><switch checked="{{newActivities}}" color="#165dcc" data-field="newActivities" bindchange="change" disabled="{{saving}}" aria-label="匹配到新活动提醒" /></label>
       <label class="setting-row"><view class="setting-copy"><text class="setting-title">活动即将截止</text><text class="setting-description">跟进已加入但本期尚未完成的活动</text></view><switch checked="{{deadlines}}" color="#165dcc" data-field="deadlines" bindchange="change" disabled="{{saving}}" aria-label="活动即将截止提醒" /></label>
-      <label class="setting-row"><view class="setting-copy"><text class="setting-title">奖励待到账</text><text class="setting-description">按你填写的预计到账日提醒确认</text></view><switch checked="{{rewards}}" color="#165dcc" data-field="rewards" bindchange="change" disabled="{{saving}}" aria-label="奖励待到账提醒" /></label>
-      <label class="setting-row"><view class="setting-copy"><text class="setting-title">信用卡还款</text><text class="setting-description">按卡包中保存的还款日期跟进</text></view><switch checked="{{repayments}}" color="#165dcc" data-field="repayments" bindchange="change" disabled="{{saving}}" aria-label="信用卡还款提醒" /></label>
+      <label class="setting-row"><view class="setting-copy"><text class="setting-title">返现待到账</text><text class="setting-description">按你填写的预计到账日提醒确认</text></view><switch checked="{{rewards}}" color="#165dcc" data-field="rewards" bindchange="change" disabled="{{saving}}" aria-label="返现待到账提醒" /></label>
+      <label class="setting-row"><view class="setting-copy"><text class="setting-title">信用卡还款</text><text class="setting-description">允许按账单还款日发送已单独授权的微信提醒</text></view><switch checked="{{repayments}}" color="#165dcc" data-field="repayments" bindchange="change" disabled="{{saving}}" aria-label="信用卡还款提醒" /></label>
     </view>
-    <view class="note"><text class="note-title">微信消息需要单独开启</text><text class="note-copy">设置偏好后，可在活动列表开启下一次新活动提醒，或在具体活动、账单中开启本次提醒，并同意微信订阅消息。关闭某类提醒后，该类微信消息将不再发送，已有待办记录仍会保留。</text><text class="note-copy">还款日期以银行账单为准，提醒不能代替银行通知。</text></view>
+    <view class="note"><text class="note-title">保存偏好不等于微信授权</text><text class="note-copy">还款提醒：先开启“信用卡还款”并保存，再到卡包的具体未还账单，点“开启本期微信提醒”并同意微信订阅消息。授权只针对这笔账单，下一期需重新开启。</text><text class="note-copy">新活动提醒在活动列表开启；截止和待到账提醒在具体活动中开启。关闭偏好后，相应微信消息不再发送，站内待办记录仍会保留。演示模式只展示说明，不发送微信消息。</text><text class="note-copy">还款日期以银行账单为准，提醒不能代替银行通知。</text></view>
     <text wx:if="{{saved}}" class="saved-message">提醒设置已保存</text>
     <button class="primary-button" bindtap="save" loading="{{saving}}" disabled="{{saving || !dirty}}">{{saving ? '正在保存' : '保存设置'}}</button>
   </block>

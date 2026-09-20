@@ -1,5 +1,6 @@
 import type { Currency, Participation, Stage } from '../../shared/contracts';
 import { todayCN } from '../../domain/calendar';
+import { benefitCopy, BenefitKind } from './benefit-copy';
 
 const symbols: Record<Currency,string> = {CNY:'¥',HKD:'HK$',MOP:'MOP$'};
 export function money(minor: number, currency: Currency='CNY'): string {
@@ -15,9 +16,10 @@ export function periodLabel(period: string): string {
   if(/^\d{4}$/.test(period))return `${period}年度`;
   return period;
 }
-export function stageLabel(value: Participation|Stage): string {
+export function stageLabel(value: Participation|Stage, kind: BenefitKind = 'cashback'): string {
   const stage=typeof value==='string'?value:value.stage;
-  return {available:'可以参与',registered:'已报名',in_progress:'进行中',completed:'已完成 · 待到账',received:'已到账',skipped:'本期不参加'}[stage]||'';
+  const copy=benefitCopy(typeof value==='string'?kind:value.snapshot.rewardKind);
+  return {available:'可以参与',registered:'已报名',in_progress:'进行中',completed:copy.completedStatus,received:copy.recordedStatus,skipped:'本期不参加'}[stage]||'';
 }
 export function showError(error: unknown): void {
   const value=error as {message?:string;errMsg?:string};

@@ -104,7 +104,7 @@ Page({
     void this.load(true);
   },
   addCard() { wx.switchTab({ url: '/pages/wallet/index' }); },
-  submitActivity() { wx.navigateTo({ url: '/pages/submission-edit/index' }); },
+  submitActivity() { wx.navigateTo({ url: '/pages/submission-lead/index' }); },
   async onSubscribe() {
     try { await requestReminder('new_activity', 'matches'); } catch (error) { showError(error); }
   },

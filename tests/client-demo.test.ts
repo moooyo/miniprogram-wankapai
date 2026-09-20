@@ -28,6 +28,7 @@ test('native client demo persists a complete record and moderator flow across qu
   await assert.rejects(api.query('submissions.list',{moderation:true}),/权限|审核|运营/);
   await setDemoRole('moderator');
   const pending=await api.query('submission.get',{id:submitted.id});
+  assert.ok(pending.draft);
   await api.command('submission.review',{id:submitted.id,decision:'publish',draft:pending.draft,sourceVerified:true,expectedVersion:pending.version});
   await setDemoRole('user');
   assert.equal((await api.query('submission.get',{id:submitted.id})).status,'published');

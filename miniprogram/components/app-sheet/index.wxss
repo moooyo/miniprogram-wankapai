@@ -1,7 +1,7 @@
-.sheet-layer { position:fixed; inset:0; z-index:100; display:flex; align-items:flex-end; }
-.sheet-mask { position:absolute; inset:0; background:rgba(16,33,57,.32); }
+.sheet-layer { position:fixed; top:0; right:0; bottom:0; left:0; z-index:100; display:flex; align-items:flex-end; }
+.sheet-mask { position:absolute; top:0; right:0; bottom:0; left:0; background:rgba(16,33,57,.32); }
 .sheet { position:relative; width:100%; max-height:88vh; display:flex; flex-direction:column; border-radius:18px 18px 0 0; background:#fff; overflow:hidden; padding-bottom:env(safe-area-inset-bottom); }
 .sheet-head { display:flex; align-items:center; justify-content:space-between; padding:8px 12px 8px 20px; min-height:60px; border-bottom:1px solid #e5ebf3; font-size:17px; font-weight:600; flex-shrink:0; }
-.sheet-close { width:44px; height:44px; min-height:44px; font-size:25px; line-height:1; border:0; background:transparent; color:#52627b; }
+.sheet-head .sheet-close { width:44px; height:44px; min-height:44px; font-size:25px; line-height:1; border:0; background:transparent; color:#52627b; }
 .sheet-body { min-height:0; max-height:calc(88vh - 60px - env(safe-area-inset-bottom)); }
 .sheet-content { padding:16px 20px 24px; }

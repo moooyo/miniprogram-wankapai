@@ -8,34 +8,41 @@
     <view class="entry-context">
       <text class="entry-eyebrow">{{periodText}}</text>
       <view class="entry-title">{{title}}</view>
+      <view wx:if="{{cardName}}" class="entry-card">关联卡片 · {{cardName}}</view>
     </view>
     <view wx:if="{{!allowed}}" class="entry-notice">本期尚未开始或已标记不参与，请返回活动详情确认记录。</view>
-    <view class="entry-field">
-      <label class="entry-label" for="amount">实际到账金额</label>
+    <view wx:if="{{conflict || reapplyRequired}}" id="record-conflict" class="entry-notice">
+      <view>{{conflict ? '记录已更新，你的金额和日期仍然保留。' : latestSummary}}</view>
+      <view wx:if="{{reapplyRequired}}">下方是你的填写内容，请核对后重新应用。</view>
+      <button wx:if="{{conflict}}" class="entry-secondary" bindtap="reloadLatest" loading="{{reloading}}" disabled="{{reloading}}">读取最新记录</button>
+    </view>
+    <view class="entry-field" id="amount-field">
+      <label class="entry-label" for="amount">{{benefit.amountLabel}}</label>
       <view class="entry-input-line {{amountError ? 'entry-input-invalid' : ''}}">
         <text class="entry-currency">{{currency}}</text>
-        <input id="amount" class="entry-amount" type="digit" value="{{amountInput}}" bindinput="onAmountInput" disabled="{{busy || !allowed}}" maxlength="18" placeholder="0.00" aria-label="实际到账金额，{{currency}}" adjust-position="{{true}}" />
+        <input id="amount" class="entry-amount" type="digit" value="{{amountInput}}" bindinput="onAmountInput" disabled="{{busy || reloading || !allowed}}" maxlength="18" placeholder="0.00" aria-label="{{benefit.amountLabel}}，{{currency}}" adjust-position="{{true}}" focus="{{focusField === 'amount'}}" />
       </view>
       <view wx:if="{{amountError}}" class="entry-error" role="alert">{{amountError}}</view>
-      <view class="entry-hint">预计收益 {{expectedText}}，请按实际收到的金额记录。</view>
+      <view class="entry-hint">{{benefit.expectedLabel}} {{expectedText}}，{{benefit.isDiscount ? '请按实际抵扣的金额记录。' : '请按实际收到的金额记录。'}}</view>
     </view>
-    <view class="entry-field entry-date-field">
-      <view class="entry-label">实际到账日期</view>
-      <picker mode="date" value="{{receivedOn}}" start="{{minDate}}" end="{{maxDate}}" bindchange="onDateChange" disabled="{{busy || !allowed}}" aria-label="选择实际到账日期">
+    <view class="entry-field entry-date-field" id="receipt-date-field">
+      <view class="entry-label">{{benefit.dateLabel}}</view>
+      <picker mode="date" value="{{receivedOn}}" start="{{minDate}}" end="{{maxDate}}" bindchange="onDateChange" disabled="{{busy || reloading || !allowed}}" aria-label="选择{{benefit.dateLabel}}">
         <view class="entry-date {{dateError ? 'entry-input-invalid' : ''}}">
           <text>{{receivedOn}}</text>
           <text class="entry-date-edit">修改</text>
         </view>
       </picker>
       <view wx:if="{{dateError}}" class="entry-error" role="alert">{{dateError}}</view>
-      <view class="entry-hint">计入 {{monthText}}的收益，活动归属期保持不变。</view>
+      <view class="entry-hint">计入 {{monthText}}的{{benefit.isDiscount ? '已享优惠' : '返现到账'}}，活动归属期保持不变。</view>
     </view>
-    <view class="entry-explanation" wx:if="{{isEditing}}">保存将更正这笔收益，不会重复增加一笔。</view>
-    <view class="entry-explanation" wx:elif="{{willComplete}}">确认到账时，会同时标记本期活动已完成。</view>
+    <view class="entry-explanation" wx:if="{{isEditing}}">保存将更正这笔{{benefit.recordNoun}}，不会重复增加一笔。</view>
+    <view class="entry-explanation" wx:elif="{{willComplete}}">{{benefit.recordAction}}时，会同时标记本期活动已完成。</view>
     <view wx:if="{{formError}}" class="entry-form-error" role="alert">{{formError}}</view>
+    <view wx:if="{{draftNotice}}" class="entry-hint">{{draftNotice}}</view>
     <view class="entry-actions">
-      <button class="entry-secondary" bindtap="back" disabled="{{busy}}">取消</button>
-      <button class="entry-primary" bindtap="save" loading="{{busy}}" disabled="{{busy || !allowed}}">{{busy ? '正在保存' : (isEditing ? '保存更正' : '确认到账')}}</button>
+      <button class="entry-secondary" bindtap="back" disabled="{{busy || reloading}}">返回</button>
+      <button class="entry-primary" bindtap="save" loading="{{busy}}" disabled="{{busy || reloading || conflict || !allowed}}">{{busy ? '正在保存' : reapplyRequired ? '重新应用并保存' : (isEditing ? '保存更正' : benefit.recordAction)}}</button>
     </view>
   </block>
 </view>

@@ -3,6 +3,6 @@
     <view class="privacy-title">使用前请了解</view>
     <view class="privacy-copy">上传活动入口图片需要使用你选择的照片。个人卡包、进度与收益仅供你查看；投稿内容审核通过后才公开。</view>
     <button class="privacy-link" bindtap="openPolicy">阅读《用户隐私保护指引》</button>
-    <view class="privacy-actions"><button bindtap="reject">暂不同意</button><button id="privacy-agree" class="primary" open-type="agreePrivacyAuthorization" bindagreeprivacyauthorization="agree">同意并继续</button></view>
+    <view class="privacy-actions"><button class="privacy-action" bindtap="reject">暂不同意</button><button id="privacy-agree" class="privacy-action primary" open-type="agreePrivacyAuthorization" bindagreeprivacyauthorization="agree">同意并继续</button></view>
   </view>
 </view>

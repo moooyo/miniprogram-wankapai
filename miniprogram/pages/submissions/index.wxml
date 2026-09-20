@@ -2,11 +2,13 @@
   <view class="page-heading"><view><text class="page-title">我的投稿</text><text class="page-description">审核通过后，活动才会公开。</text></view><button class="new-button" bindtap="create">分享活动</button></view>
   <view wx:if="{{error}}" class="error"><text>{{error}}</text><button class="text-button" bindtap="load">重试</button></view>
   <view wx:if="{{loading}}" class="loading">正在读取投稿…</view>
-  <view wx:elif="{{!items.length}}" class="empty"><text class="empty-title">还没有分享过活动</text><text class="page-description">把银行的活动规则、来源和参与入口记录下来，交给运营核实。</text><button class="primary-button" bindtap="create">分享第一个活动</button></view>
+  <view wx:elif="{{!items.length}}" class="empty"><text class="empty-title">还没有分享过活动</text><text class="page-description">填上银行、活动标题，再附链接、银行路径或截图，即可交给运营补齐核实。</text><button class="primary-button" bindtap="create">分享第一个活动</button></view>
   <view wx:else class="submission-list">
     <button wx:for="{{items}}" wx:key="id" class="submission-row" bindtap="open" data-id="{{item.id}}">
       <view class="row-top"><text class="bank-name">{{item.bankName}}</text><text class="status {{item.status}}">{{item.statusLabel}}</text></view>
-      <text class="submission-title">{{item.draft.title}}</text>
+      <text class="submission-title">{{item.titleText}}</text>
+      <text class="page-description">{{item.isLead ? '活动线索 · 运营将补齐完整规则' : '完整活动投稿'}}</text>
+      <text class="submission-summary">{{item.summaryText}}</text>
       <text wx:if="{{item.status === 'returned'}}" class="review-note">{{item.reviewNote}}</text>
       <view class="row-bottom"><text>{{item.dateLabel}} 更新</text><text class="row-link">{{item.status === 'returned' ? '补充投稿' : item.status === 'pending' ? '查看与修改' : '查看详情'}}<text class="chevron" aria-hidden="true">›</text></text></view>
     </button>
