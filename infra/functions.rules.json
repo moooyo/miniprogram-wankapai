@@ -1,0 +1,5 @@
+{
+  "*": { "invoke": false },
+  "api": { "invoke": "auth != null" },
+  "reminders": { "invoke": false }
+}

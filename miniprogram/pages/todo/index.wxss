@@ -1,0 +1,41 @@
+.todo-page { background:#fff; min-height:100vh; padding-bottom:40rpx; }
+.page-heading { padding:12rpx 0 30rpx; }
+.eyebrow { color:#647084; font-size:26rpx; }
+.heading { font-size:48rpx; font-weight:650; color:#14243a; margin-top:8rpx; }
+.text-button { color:#1764d9; background:transparent; font-size:28rpx; min-height:48px; padding:0 12rpx; }
+.text-button::after,.tab::after,.task-open::after,.follow-up::after,.more-button::after,.sheet-actions button::after { border:0; }
+.follow-ups { display:flex; border-top:1rpx solid #e5eaf1; border-bottom:1rpx solid #e5eaf1; margin-bottom:18rpx; }
+.follow-up { background:transparent; flex:1; border-radius:0; display:flex; align-items:center; gap:14rpx; min-height:48px; font-size:26rpx; padding:0 14rpx 0 0; }
+.follow-up + .follow-up { padding-left:24rpx; border-left:1rpx solid #e5eaf1; }
+.follow-up-value { color:#14243a; font-weight:600; }
+.arrow { color:#6b7789; margin-left:auto; font-size:36rpx; }
+.tabs { display:flex; gap:24rpx; border-bottom:1rpx solid #e5eaf1; }
+.tab { background:transparent; border-radius:0; margin:0; padding:0 0 4rpx; min-height:48px; font-size:28rpx; color:#647084; border-bottom:4rpx solid transparent; }
+.tab text { font-size:24rpx; margin-left:4rpx; }
+.tab.active { color:#1764d9; border-bottom-color:#1764d9; font-weight:600; }
+.closing-filter { min-height:100rpx; font-size:25rpx; color:#647084; gap:12rpx; }
+.closing-filter switch { flex-shrink:0; min-height:48px; display:flex; align-items:center; }
+.task-row { display:flex; gap:26rpx; padding:26rpx 0; border-top:1rpx solid #e5eaf1; }
+.date-column { width:68rpx; flex-shrink:0; display:flex; flex-direction:column; align-items:center; padding-top:7rpx; color:#526579; }
+.date-day { font-size:42rpx; line-height:1.1; font-weight:600; font-variant-numeric:tabular-nums; }
+.date-month { font-size:23rpx; margin-top:10rpx; }
+.overdue { color:#a8442c; }
+.task-body { min-width:0; flex:1; }
+.task-open { text-align:left; line-height:1.5; background:transparent; padding:0; margin:0; border-radius:0; }
+.bank-line { display:flex; align-items:center; gap:10rpx; color:#647084; font-size:24rpx; }
+.bank-logo { width:30rpx; height:30rpx; flex-shrink:0; }
+.task-status { margin-left:auto; color:#647084; font-size:22rpx; }
+.task-title { font-size:32rpx; font-weight:600; color:#14243a; margin-top:8rpx; }
+.task-meta { display:flex; justify-content:space-between; flex-wrap:wrap; gap:8rpx 16rpx; font-size:24rpx; line-height:1.5; color:#647084; margin-top:12rpx; }
+.reward { color:#243b58; font-weight:600; font-variant-numeric:tabular-nums; }
+.task-actions { display:flex; gap:16rpx; margin-top:18rpx; align-items:center; flex-wrap:wrap; }
+.small-primary,.small-secondary { font-size:25rpx; padding:0 24rpx; min-height:48px; line-height:48px; border-radius:12rpx; margin:0; }
+.small-primary { color:#1764d9; background:#edf4ff; }
+.small-secondary { color:#243b58; background:#fff; }
+.small-primary::after { border:0; }
+.small-secondary::after { border-color:#c8d2df; border-radius:24rpx; }
+.more-button { min-height:48px; line-height:48px; font-size:24rpx; color:#647084; background:transparent; margin:0 0 0 auto; padding:0 8rpx; }
+.loading,.empty { padding:72rpx 12rpx; text-align:center; font-size:28rpx; line-height:1.65; }
+.empty-title { color:#14243a; font-size:32rpx; font-weight:600; margin-bottom:12rpx; }
+.empty button { margin-top:28rpx; }
+.sheet-actions button { width:100%; background:#fff; text-align:left; padding:20rpx 12rpx; min-height:48px; color:#243b58; border-radius:0; border-bottom:1rpx solid #e5eaf1; font-size:30rpx; }

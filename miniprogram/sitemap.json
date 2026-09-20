@@ -1,0 +1,1 @@
+{ "desc": "Index only published discovery routes after category approval.", "rules": [{ "action": "disallow", "page": "*" }] }

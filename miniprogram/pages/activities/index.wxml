@@ -1,0 +1,49 @@
+<view class="activity-page">
+  <view class="discovery-controls">
+    <view class="bank-toolbar">
+      <scroll-view class="bank-rail" scroll-x enhanced show-scrollbar="{{false}}" enable-flex aria-label="横向滑动选择银行">
+        <view class="bank-options">
+          <button class="bank-choice {{bankId === '' ? 'is-selected' : ''}}" data-id="" bindtap="chooseBank" aria-label="筛选全部银行" aria-pressed="{{bankId === ''}}">
+            <view class="all-bank-mark">全</view><text>全部</text>
+          </button>
+          <button wx:for="{{banks}}" wx:key="id" class="bank-choice {{bankId === item.id ? 'is-selected' : ''}}" data-id="{{item.id}}" bindtap="chooseBank" aria-pressed="{{bankId === item.id}}">
+            <image class="bank-logo" src="{{item.logo}}" mode="aspectFit" aria-hidden="true"/><text>{{item.shortName}}</text>
+          </button>
+        </view>
+      </scroll-view>
+      <button class="all-banks" bindtap="openBanks" aria-label="展开全部银行，支持搜索"><view class="grid-mark"><view/><view/><view/><view/></view><text>全部银行</text></button>
+    </view>
+    <view class="filter-row">
+      <text class="filter-count">{{loading ? '正在查找…' : mineOnly ? '已按持有卡匹配' : '查看全部卡片活动'}}</text>
+      <label class="mine-control" for="mine-switch"><text>只看我的卡</text><switch id="mine-switch" checked="{{mineOnly}}" bindchange="changeMine" color="#1f61d8" aria-label="只看我的卡"/></label>
+    </view>
+  </view>
+  <view class="activity-content">
+    <view class="feed-heading"><text class="section-title">{{bankName}}</text><view class="feed-actions"><button class="text-button subscribe-button" bindtap="onSubscribe">订阅新活动</button><button class="text-button" bindtap="submitActivity">投稿</button></view></view>
+    <view wx:if="{{loading}}" class="state-block"><text>正在加载活动…</text></view>
+    <view wx:elif="{{error}}" class="state-block"><text>{{error}}</text><button class="button secondary" bindtap="retry">重新加载</button></view>
+    <block wx:else>
+      <view wx:for="{{items}}" wx:key="id" class="activity-tile">
+        <button class="offer-heading" data-id="{{item.id}}" data-participation="{{item.participationId}}" bindtap="openActivity">
+          <view class="offer-bank"><image class="bank-logo-small" src="{{item.logo}}" mode="aspectFit" aria-hidden="true"/><text>{{item.bankName}}</text><text class="period-label">{{item.frequencyLabel}}</text></view>
+          <text class="tile-title">{{item.title}}</text>
+        </button>
+        <text class="tile-description">{{item.conditions}}</text>
+        <view class="tile-facts"><text>{{item.cardDescription}}</text><text>{{item.endsOn}} 截止</text></view>
+        <text wx:if="{{item.invited}}" class="qualification">仅限受邀用户，请核对资格</text>
+        <view class="tile-bottom"><view class="tile-reward"><text class="reward-value">{{item.reward}}</text><text class="reward-label">{{item.rewardLabel}}</text></view><button class="tile-action" data-id="{{item.id}}" data-participation="{{item.participationId}}" bindtap="openActivity">{{item.actionLabel}}<text aria-hidden="true"> ›</text></button></view>
+      </view>
+      <view wx:if="{{!items.length}}" class="state-block"><text class="empty-title">暂无匹配的活动</text><text>可以查看其他活动，或补充你持有的卡片。</text><button class="button secondary" bindtap="clearFilters">查看全部活动</button><button class="text-button" bindtap="addCard">管理我的卡包</button></view>
+      <button wx:if="{{cursor}}" class="more-button" bindtap="loadMore" loading="{{loadingMore}}" disabled="{{loadingMore}}">{{loadingMore ? '加载中' : '查看更多活动'}}</button>
+      <text wx:elif="{{items.length}}" class="feed-end">已显示当前筛选下的全部活动</text>
+    </block>
+  </view>
+</view>
+<app-sheet show="{{showBanks}}" title="全部银行" bindclose="closeBanks">
+  <input class="bank-search" value="{{bankSearch}}" placeholder="搜索银行名称" bindinput="searchBanks" confirm-type="search" aria-label="搜索银行名称"/>
+  <view class="bank-grid">
+    <button wx:if="{{!bankSearch}}" class="bank-grid-choice {{bankId === '' ? 'is-selected' : ''}}" data-id="" bindtap="chooseBank"><view class="all-bank-mark">全</view><text>全部银行</text></button>
+    <button wx:for="{{filteredBanks}}" wx:key="id" class="bank-grid-choice {{bankId === item.id ? 'is-selected' : ''}}" data-id="{{item.id}}" bindtap="chooseBank"><image class="bank-logo" src="{{item.logo}}" mode="aspectFit" aria-hidden="true"/><text>{{item.name}}</text></button>
+  </view>
+  <text wx:if="{{!filteredBanks.length}}" class="search-empty">没有找到这家银行，试试简称。</text>
+</app-sheet>

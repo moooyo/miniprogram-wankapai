@@ -1,0 +1,15 @@
+<view class="submissions-page">
+  <view class="page-heading"><view><text class="page-title">我的投稿</text><text class="page-description">审核通过后，活动才会公开。</text></view><button class="new-button" bindtap="create">分享活动</button></view>
+  <view wx:if="{{error}}" class="error"><text>{{error}}</text><button class="text-button" bindtap="load">重试</button></view>
+  <view wx:if="{{loading}}" class="loading">正在读取投稿…</view>
+  <view wx:elif="{{!items.length}}" class="empty"><text class="empty-title">还没有分享过活动</text><text class="page-description">把银行的活动规则、来源和参与入口记录下来，交给运营核实。</text><button class="primary-button" bindtap="create">分享第一个活动</button></view>
+  <view wx:else class="submission-list">
+    <button wx:for="{{items}}" wx:key="id" class="submission-row" bindtap="open" data-id="{{item.id}}">
+      <view class="row-top"><text class="bank-name">{{item.bankName}}</text><text class="status {{item.status}}">{{item.statusLabel}}</text></view>
+      <text class="submission-title">{{item.draft.title}}</text>
+      <text wx:if="{{item.status === 'returned'}}" class="review-note">{{item.reviewNote}}</text>
+      <view class="row-bottom"><text>{{item.dateLabel}} 更新</text><text class="row-link">{{item.status === 'returned' ? '补充投稿' : item.status === 'pending' ? '查看与修改' : '查看详情'}}<text class="chevron" aria-hidden="true">›</text></text></view>
+    </button>
+  </view>
+  <button wx:if="{{nextCursor}}" class="text-button more-button" bindtap="loadMore" loading="{{loadingMore}}" disabled="{{loadingMore}}">加载更多</button>
+</view>

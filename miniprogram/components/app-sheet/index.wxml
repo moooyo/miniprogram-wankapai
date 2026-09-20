@@ -1,0 +1,7 @@
+<view wx:if="{{show}}" class="sheet-layer">
+  <view class="sheet-mask" bindtap="close" catchtouchmove="stop"></view>
+  <view class="sheet" role="dialog" aria-label="{{title}}" aria-modal="true">
+    <view class="sheet-head"><text>{{title}}</text><button class="sheet-close" aria-label="关闭面板" bindtap="close">×</button></view>
+    <scroll-view class="sheet-body" style="height: {{bodyHeight}}px;" scroll-y enhanced show-scrollbar="{{false}}"><view class="sheet-content"><slot></slot></view></scroll-view>
+  </view>
+</view>

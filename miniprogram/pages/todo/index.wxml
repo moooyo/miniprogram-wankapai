@@ -1,0 +1,39 @@
+<view class="page todo-page">
+  <view class="page-heading row-between"><view><text class="eyebrow">{{dateLabel}}</text><view class="heading">我的待办</view></view><button class="text-button" bindtap="browse">找活动</button></view>
+  <view class="follow-ups" wx:if="{{pendingCount || billCount}}">
+    <button class="follow-up" wx:if="{{pendingCount}}" bindtap="openRewards"><text class="text-muted">待到账</text><text class="follow-up-value">{{pendingCount}} 笔</text><text class="arrow">›</text></button>
+    <button class="follow-up" wx:if="{{billCount}}" bindtap="openWallet"><text class="text-muted">最近还款</text><text class="follow-up-value">{{nearestBill}}</text><text class="arrow">›</text></button>
+  </view>
+  <view class="tabs" role="tablist">
+    <button class="tab {{filter === 'unfinished' ? 'active' : ''}}" data-filter="unfinished" bindtap="selectFilter" role="tab" aria-selected="{{filter === 'unfinished'}}">未完成 <text>{{unfinishedCount}}</text></button>
+    <button class="tab {{filter === 'completed' ? 'active' : ''}}" data-filter="completed" bindtap="selectFilter" role="tab" aria-selected="{{filter === 'completed'}}">已完成 <text>{{completedCount}}</text></button>
+    <button class="tab {{filter === 'all' ? 'active' : ''}}" data-filter="all" bindtap="selectFilter" role="tab" aria-selected="{{filter === 'all'}}">全部 <text>{{allCount}}</text></button>
+  </view>
+  <view class="closing-filter row-between"><text>{{monthLabel}} · 只看未完成</text><switch checked="{{closingOnly}}" color="#1764D9" bindchange="toggleClosing" aria-label="仅显示本月底前截止的未完成活动" /></view>
+  <view class="loading text-muted" wx:if="{{loading}}">正在更新待办…</view>
+  <view class="empty" wx:elif="{{failed}}"><view class="empty-title">待办暂时无法加载</view><button class="secondary" bindtap="load">重试</button></view>
+  <view wx:elif="{{tasks.length}}" class="task-list">
+    <view class="task-row" wx:for="{{tasks}}" wx:key="id">
+      <view class="date-column {{item.late ? 'overdue' : ''}}" aria-label="{{item.deadline}}截止"><text class="date-day">{{item.dateDay}}</text><text class="date-month">{{item.dateMonth}}</text></view>
+      <view class="task-body">
+        <button class="task-open" data-id="{{item.id}}" bindtap="openTask"><view class="bank-line"><image wx:if="{{item.logo}}" class="bank-logo" src="{{item.logo}}" mode="aspectFit" /><text>{{item.bank}}</text><text class="task-status">{{item.status}}</text></view><view class="task-title">{{item.title}}</view></button>
+        <view class="task-meta"><text>{{item.skipped ? '本期已跳过' : item.closed ? (item.pending ? '完成后仍会保留到账待办' : '收益已记入到账月份') : item.progress}}</text><text class="reward">{{item.reward}}</text></view>
+        <view class="task-actions">
+          <button wx:if="{{item.pending}}" class="small-primary" data-id="{{item.id}}" loading="{{busyId === item.id}}" disabled="{{!!busyId}}" bindtap="receipt">确认到账</button>
+          <button wx:elif="{{!item.closed && !item.skipped}}" class="small-primary" data-id="{{item.id}}" loading="{{busyId === item.id}}" disabled="{{!!busyId}}" bindtap="complete">标记完成</button>
+          <button wx:if="{{!item.closed && !item.skipped}}" class="small-secondary" data-id="{{item.id}}" bindtap="receipt">记到账</button>
+          <button class="more-button" data-id="{{item.id}}" bindtap="showMore" aria-label="{{item.title}}的更多操作">更多</button>
+        </view>
+      </view>
+    </view>
+  </view>
+  <view class="empty" wx:else><view class="empty-title">{{closingOnly ? '本月底前没有遗漏的活动' : filter === 'completed' ? '完成的活动会留在这里' : filter === 'all' ? '把想参加的活动加进来' : '当前没有未完成活动'}}</view><text class="text-muted">{{filter === 'completed' ? '收益到账后，再确认实际金额和日期。' : '每期单独记录，完成后也能随时回看。'}}</text><button class="secondary" bindtap="browse">浏览活动</button></view>
+</view>
+<app-sheet show="{{showActions}}" title="{{actionTitle}}" bindclose="closeActions">
+  <view class="sheet-actions">
+    <button wx:if="{{actionStage !== 'received'}}" bindtap="receipt">{{actionStage === 'completed' ? '确认收益到账' : '完成并记到账'}}</button>
+    <button wx:if="{{actionStage === 'completed'}}" bindtap="undoComplete">撤销完成</button>
+    <button wx:if="{{actionStage !== 'completed' && actionStage !== 'received'}}" bindtap="toggleSkip">{{actionStage === 'skipped' ? '恢复本期参与' : '本期不参加'}}</button>
+    <button data-id="{{actionId}}" bindtap="openTask">查看记录与活动入口</button>
+  </view>
+</app-sheet>

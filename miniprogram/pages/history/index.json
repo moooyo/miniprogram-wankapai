@@ -1,0 +1,5 @@
+{
+  "navigationBarTitleText": "参与记录",
+  "enablePullDownRefresh": true,
+  "usingComponents": { "app-sheet": "/components/app-sheet/index" }
+}

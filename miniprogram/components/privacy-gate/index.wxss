@@ -1,0 +1,7 @@
+.privacy-layer { position:fixed; inset:0; z-index:200; background:rgba(16,33,57,.38); display:flex; align-items:center; padding:24px; }
+.privacy-panel { width:100%; padding:22px; background:#fff; border-radius:16px; }
+.privacy-title { font-size:19px; font-weight:600; margin-bottom:14px; }
+.privacy-copy { font-size:14px; line-height:1.8; color:#526178; }
+.privacy-link { background:none; color:#1f61d8; padding:12px 0; }
+.privacy-actions { display:flex; gap:10px; margin-top:8px; }
+.privacy-actions button { flex:1; font-size:13px; }

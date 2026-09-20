@@ -1,0 +1,11 @@
+{
+  "compilerOptions": {
+    "target": "ES2020", "module": "CommonJS", "moduleResolution": "Node",
+    "lib": ["ES2022"], "types": ["node", "miniprogram-api-typings"],
+    "strict": true, "esModuleInterop": true, "skipLibCheck": true,
+    "resolveJsonModule": true, "forceConsistentCasingInFileNames": true,
+    "allowJs": true, "checkJs": false, "noEmit": true
+  },
+  "include": ["shared/**/*.ts", "domain/**/*.ts", "cloudfunctions/**/*.ts", "miniprogram/**/*.ts", "tests/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}

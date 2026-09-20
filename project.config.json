@@ -1,0 +1,10 @@
+{
+  "description": "Bank benefits native WeChat mini-program",
+  "miniprogramRoot": "dist/miniprogram/",
+  "cloudfunctionRoot": "dist/cloudfunctions/",
+  "compileType": "miniprogram",
+  "appid": "touristappid",
+  "projectname": "bank-benefits",
+  "setting": { "es6": true, "enhance": true, "postcss": true, "minified": true, "urlCheck": true, "ignoreUploadUnusedFiles": true },
+  "packOptions": { "ignore": [] }
+}

@@ -1,0 +1,31 @@
+{
+  "collections": [
+    "activities", "activity_revisions", "submissions", "cards", "billing_accounts", "bills",
+    "trackings", "participations", "rewards", "assets", "audit_events", "preferences",
+    "requests", "reminder_jobs", "reminder_grants"
+  ],
+  "clientRulesFile": "database.rules.json",
+  "indexes": [
+    { "collection": "activities", "fields": [["status", "asc"], ["_id", "asc"]] },
+    { "collection": "activities", "fields": [["status", "asc"], ["endsOn", "asc"], ["id", "asc"], ["_id", "asc"]] },
+    { "collection": "submissions", "fields": [["ownerId", "asc"], ["status", "asc"], ["updatedAt", "desc"], ["id", "asc"], ["_id", "asc"]] },
+    { "collection": "submissions", "fields": [["ownerId", "asc"], ["updatedAt", "desc"], ["id", "asc"], ["_id", "asc"]] },
+    { "collection": "submissions", "fields": [["status", "asc"], ["updatedAt", "desc"], ["id", "asc"], ["_id", "asc"]] },
+    { "collection": "submissions", "fields": [["updatedAt", "desc"], ["id", "asc"], ["_id", "asc"]] },
+    { "collection": "participations", "fields": [["ownerId", "asc"], ["activityId", "asc"], ["periodKey", "asc"], ["scopeKey", "asc"], ["_id", "asc"]] },
+    { "collection": "participations", "fields": [["ownerId", "asc"], ["startsOn", "desc"], ["id", "asc"], ["_id", "asc"]] },
+    { "collection": "participations", "fields": [["ownerId", "asc"], ["activityId", "asc"], ["startsOn", "desc"], ["id", "asc"], ["_id", "asc"]] },
+    { "collection": "participations", "fields": [["ownerId", "asc"], ["stage", "asc"], ["_id", "asc"]] },
+    { "collection": "participations", "fields": [["ownerId", "asc"], ["endsOn", "asc"], ["_id", "asc"]] },
+    { "collection": "participations", "fields": [["ownerId", "asc"], ["activityId", "asc"], ["startsOn", "desc"], ["_id", "asc"]] },
+    { "collection": "trackings", "fields": [["ownerId", "asc"], ["activityId", "asc"], ["scopeKey", "asc"], ["_id", "asc"]] },
+    { "collection": "trackings", "fields": [["ownerId", "asc"], ["enabled", "asc"], ["_id", "asc"]] },
+    { "collection": "rewards", "fields": [["ownerId", "asc"], ["currency", "asc"], ["receivedOn", "desc"], ["id", "asc"], ["_id", "asc"]] },
+    { "collection": "rewards", "fields": [["ownerId", "asc"], ["participationId", "asc"], ["_id", "asc"]] },
+    { "collection": "audit_events", "fields": [["ownerId", "asc"], ["entityId", "asc"], ["at", "desc"], ["_id", "asc"]] },
+    { "collection": "reminder_grants", "fields": [["ownerId", "asc"], ["kind", "asc"], ["entityId", "asc"], ["templateId", "asc"], ["remaining", "asc"], ["_id", "asc"]] },
+    { "collection": "reminder_jobs", "fields": [["status", "asc"], ["dueOn", "desc"], ["id", "asc"], ["_id", "asc"]] }
+  ],
+  "ownerIndexCollections": ["cards", "billing_accounts", "bills", "participations", "trackings", "rewards", "assets", "audit_events"],
+  "ownerIndexFields": [["ownerId", "asc"], ["_id", "asc"]]
+}

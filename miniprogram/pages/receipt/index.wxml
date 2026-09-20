@@ -1,0 +1,41 @@
+<view class="entry-page">
+  <view wx:if="{{loading}}" class="entry-state" role="status">正在读取活动…</view>
+  <view wx:elif="{{loadError}}" class="entry-state">
+    <view class="entry-error">{{loadError}}</view>
+    <button class="entry-secondary" bindtap="load">重新加载</button>
+  </view>
+  <block wx:else>
+    <view class="entry-context">
+      <text class="entry-eyebrow">{{periodText}}</text>
+      <view class="entry-title">{{title}}</view>
+    </view>
+    <view wx:if="{{!allowed}}" class="entry-notice">本期尚未开始或已标记不参与，请返回活动详情确认记录。</view>
+    <view class="entry-field">
+      <label class="entry-label" for="amount">实际到账金额</label>
+      <view class="entry-input-line {{amountError ? 'entry-input-invalid' : ''}}">
+        <text class="entry-currency">{{currency}}</text>
+        <input id="amount" class="entry-amount" type="digit" value="{{amountInput}}" bindinput="onAmountInput" disabled="{{busy || !allowed}}" maxlength="18" placeholder="0.00" aria-label="实际到账金额，{{currency}}" adjust-position="{{true}}" />
+      </view>
+      <view wx:if="{{amountError}}" class="entry-error" role="alert">{{amountError}}</view>
+      <view class="entry-hint">预计收益 {{expectedText}}，请按实际收到的金额记录。</view>
+    </view>
+    <view class="entry-field entry-date-field">
+      <view class="entry-label">实际到账日期</view>
+      <picker mode="date" value="{{receivedOn}}" start="{{minDate}}" end="{{maxDate}}" bindchange="onDateChange" disabled="{{busy || !allowed}}" aria-label="选择实际到账日期">
+        <view class="entry-date {{dateError ? 'entry-input-invalid' : ''}}">
+          <text>{{receivedOn}}</text>
+          <text class="entry-date-edit">修改</text>
+        </view>
+      </picker>
+      <view wx:if="{{dateError}}" class="entry-error" role="alert">{{dateError}}</view>
+      <view class="entry-hint">计入 {{monthText}}的收益，活动归属期保持不变。</view>
+    </view>
+    <view class="entry-explanation" wx:if="{{isEditing}}">保存将更正这笔收益，不会重复增加一笔。</view>
+    <view class="entry-explanation" wx:elif="{{willComplete}}">确认到账时，会同时标记本期活动已完成。</view>
+    <view wx:if="{{formError}}" class="entry-form-error" role="alert">{{formError}}</view>
+    <view class="entry-actions">
+      <button class="entry-secondary" bindtap="back" disabled="{{busy}}">取消</button>
+      <button class="entry-primary" bindtap="save" loading="{{busy}}" disabled="{{busy || !allowed}}">{{busy ? '正在保存' : (isEditing ? '保存更正' : '确认到账')}}</button>
+    </view>
+  </block>
+</view>

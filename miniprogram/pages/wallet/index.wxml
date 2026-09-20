@@ -1,0 +1,28 @@
+<view class="page wallet-page">
+  <view class="page-heading row-between"><view><view class="heading">卡包</view><text class="text-muted wallet-count">{{cardCount}} 张卡 · {{bankCount}} 家银行</text></view><button class="text-button" bindtap="addCard">添加卡片</button></view>
+  <view class="loading text-muted" wx:if="{{loading}}">正在更新卡包…</view>
+  <view class="empty" wx:elif="{{failed}}"><view class="empty-title">卡包暂时无法加载</view><button class="secondary" bindtap="load">重试</button></view>
+  <block wx:else>
+    <view wx:if="{{groups.length}}" class="section-heading">还款计划</view>
+    <view class="account-group" wx:for="{{groups}}" wx:key="id" wx:for-item="group">
+      <view wx:if="{{group.archived}}" class="archived-label">{{group.settledArchive ? '已归档账户历史' : '已归档账户待还'}}</view>
+      <view class="account-head"><image class="bank-logo" src="{{group.logo}}" mode="aspectFit" /><view class="account-info"><view class="account-title">{{group.title}}</view><text class="account-subtitle">{{group.subtitle}}</text></view><button wx:if="{{group.primaryCardId && !group.archived}}" class="text-button" data-id="{{group.primaryCardId}}" bindtap="editCard">设置</button></view>
+      <view wx:if="{{group.primaryBill && (!group.settledArchive || group.expanded)}}" class="bill-main">
+        <view class="row-between bill-date-row"><view><view class="due-date {{group.primaryBill.late ? 'late' : ''}}">{{group.primaryBill.dateLabel}}</view><text class="bill-status">{{group.primaryBill.paid ? '已标记还款' : group.primaryBill.late ? '登记的还款日已过' : '还款日'}}</text></view><button class="{{group.primaryBill.paid ? 'small-secondary' : 'small-primary'}}" data-id="{{group.primaryBill.id}}" loading="{{busyId === group.primaryBill.id}}" disabled="{{!!busyId}}" bindtap="togglePaid">{{group.primaryBill.paid ? '撤销还款' : '标记还款'}}</button></view>
+        <view class="row-between bill-meta-row"><text>{{group.primaryBill.period}}账单</text><picker mode="date" value="{{group.primaryBill.dueOn}}" disabled="{{!!busyId}}" data-id="{{group.primaryBill.id}}" bindchange="changeDueDate"><view class="date-edit">修改本期日期</view></picker></view>
+      </view>
+      <view wx:elif="{{!group.primaryBill}}" class="missing-bill">本期待还款日期尚未生成，可在卡片设置中补充。</view>
+      <view wx:if="{{!group.settledArchive}}" class="schedule">{{group.statement}}</view>
+      <button wx:if="{{group.cards.length > 1 || group.otherBills.length || group.settledArchive}}" class="disclosure" data-id="{{group.id}}" bindtap="toggleGroup" aria-expanded="{{group.expanded}}">{{group.expanded ? '收起' : '查看'}}{{group.settledArchive ? '历史账单' : group.cards.length > 1 ? '共用卡片' : '其他账单'}}<text>{{group.expanded ? '⌃' : '⌄'}}</text></button>
+      <view wx:if="{{group.expanded}}" class="account-extra">
+        <view wx:if="{{group.cards.length > 1}}" class="members"><view wx:for="{{group.cards}}" wx:key="id" wx:for-item="card" class="member-row"><view><view class="member-title">{{card.title}}</view><text wx:if="{{card.description}}" class="member-description">{{card.description}}</text></view><button class="text-button" data-id="{{card.id}}" bindtap="editCard">编辑</button></view></view>
+        <view class="older-bill" wx:for="{{group.otherBills}}" wx:key="id" wx:for-item="bill"><view class="row-between"><view><view class="member-title">{{bill.dateLabel}}</view><text class="member-description">{{bill.period}} · {{bill.paid ? '已标记还款' : bill.late ? '登记日已过' : '待还款'}}</text></view><button class="text-button" data-id="{{bill.id}}" disabled="{{!!busyId}}" loading="{{busyId === bill.id}}" bindtap="togglePaid">{{bill.paid ? '撤销还款' : '标记还款'}}</button></view><picker mode="date" value="{{bill.dueOn}}" disabled="{{!!busyId}}" data-id="{{bill.id}}" bindchange="changeDueDate"><view class="date-edit">修改本期日期</view></picker></view>
+      </view>
+    </view>
+    <view wx:if="{{looseCards.length}}" class="section-heading loose-heading">{{groups.length ? '其他卡片' : '我的卡片'}}</view>
+    <view class="loose-card" wx:for="{{looseCards}}" wx:key="id"><image class="bank-logo" src="{{item.logo}}" mode="aspectFit" /><view class="account-info"><view class="account-title">{{item.issuer || item.bank}}</view><text class="account-subtitle">{{item.title}}</text><view wx:if="{{item.description}}" class="member-description">{{item.description}}</view><view wx:if="{{item.credit}}" class="member-description">未设置还款计划</view></view><button class="text-button" data-id="{{item.id}}" bindtap="editCard">编辑</button></view>
+    <view class="empty" wx:if="{{!cardCount && !groups.length}}"><view class="empty-title">把常用的卡放进来</view><text class="text-muted">选择银行和卡种，就能筛选适合你的活动。</text><button class="primary" bindtap="addCard">添加第一张卡</button></view>
+    <button wx:if="{{cardCount}}" class="browse-mine" bindtap="browseMine">查看我的卡能参加的活动 <text>›</text></button>
+    <view class="privacy-note">手动添加，无需卡号。还款以银行账单为准；微信通知需另外授权。</view>
+  </block>
+</view>

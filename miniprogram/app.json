@@ -1,0 +1,20 @@
+{
+  "pages": [
+    "pages/todo/index", "pages/activities/index", "pages/rewards/index", "pages/wallet/index", "pages/mine/index",
+    "pages/detail/index", "pages/progress/index", "pages/receipt/index", "pages/history/index", "pages/card-edit/index",
+    "pages/submissions/index", "pages/submission-edit/index", "pages/review/index", "pages/preferences/index", "pages/web-entry/index"
+  ],
+  "window": { "navigationBarTitleText": "权益清单", "navigationBarTextStyle": "black", "navigationBarBackgroundColor": "#ffffff", "backgroundColor": "#f4f7fb", "backgroundTextStyle": "dark" },
+  "tabBar": {
+    "color": "#647084", "selectedColor": "#1f61d8", "backgroundColor": "#ffffff", "borderStyle": "white",
+    "list": [
+      { "pagePath": "pages/todo/index", "text": "待办", "iconPath": "assets/tabs/todo.png", "selectedIconPath": "assets/tabs/todo-active.png" },
+      { "pagePath": "pages/activities/index", "text": "活动", "iconPath": "assets/tabs/activities.png", "selectedIconPath": "assets/tabs/activities-active.png" },
+      { "pagePath": "pages/rewards/index", "text": "收益", "iconPath": "assets/tabs/rewards.png", "selectedIconPath": "assets/tabs/rewards-active.png" },
+      { "pagePath": "pages/wallet/index", "text": "卡包", "iconPath": "assets/tabs/wallet.png", "selectedIconPath": "assets/tabs/wallet-active.png" },
+      { "pagePath": "pages/mine/index", "text": "我的", "iconPath": "assets/tabs/mine.png", "selectedIconPath": "assets/tabs/mine-active.png" }
+    ]
+  },
+  "usingComponents": { "app-sheet": "/components/app-sheet/index", "demo-notice": "/components/demo-notice/index", "privacy-gate": "/components/privacy-gate/index" },
+  "style": "v2", "lazyCodeLoading": "requiredComponents", "sitemapLocation": "sitemap.json"
+}

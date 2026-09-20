@@ -1,0 +1,11 @@
+{
+  "api": {
+    "MODERATOR_OPENIDS": "",
+    "REMINDERS_ENABLED": "false",
+    "REMINDER_TEMPLATES_JSON": "{}"
+  },
+  "reminders": {
+    "REMINDERS_ENABLED": "false",
+    "REMINDER_TEMPLATES_JSON": "{}"
+  }
+}

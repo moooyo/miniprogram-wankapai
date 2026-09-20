@@ -1,0 +1,20 @@
+{
+  "name": "bank-benefits-miniprogram",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Native WeChat bank benefits tracker with moderated activity publishing",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test tests/*.test.ts",
+    "build": "node scripts/build.mjs"
+  },
+  "engines": { "node": ">=20" },
+  "dependencies": { "wx-server-sdk": "4.0.2" },
+  "devDependencies": {
+    "@types/node": "^20.19.0",
+    "esbuild": "^0.25.0",
+    "miniprogram-api-typings": "^4.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0"
+  }
+}

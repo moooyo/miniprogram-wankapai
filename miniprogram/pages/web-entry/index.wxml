@@ -1,0 +1,2 @@
+<web-view wx:if="{{url}}" src="{{url}}"></web-view>
+<view wx:else class="page"><view class="empty">{{error}}</view><button bindtap="goBack">返回活动</button></view>

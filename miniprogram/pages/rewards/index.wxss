@@ -1,0 +1,41 @@
+.rewards-page { background:#fff; min-height:100vh; padding-bottom:40rpx; }
+.heading { font-size:48rpx; font-weight:650; color:#14243a; padding:12rpx 0 28rpx; }
+.tabs { display:flex; gap:36rpx; border-bottom:1rpx solid #e5eaf1; }
+.tab { background:transparent; border-radius:0; margin:0; padding:0 0 4rpx; min-height:48px; font-size:30rpx; color:#647084; border-bottom:4rpx solid transparent; }
+.tab::after,.ledger-row::after,.pending-open::after,.load-more::after { border:0; }
+.tab.active { color:#1764d9; border-bottom-color:#1764d9; font-weight:600; }
+.tab text { margin-left:6rpx; font-size:24rpx; }
+.reward-filters { gap:16rpx; padding:12rpx 0; min-height:48px; flex-wrap:wrap; }
+.picker-text { font-size:26rpx; color:#243b58; min-height:48px; display:flex; align-items:center; gap:16rpx; }
+.picker-text text { color:#647084; font-size:30rpx; }
+.currency-picker { color:#647084; }
+.all-periods { font-size:26rpx; color:#647084; }
+.income-summary { padding:28rpx 0 36rpx; }
+.income-summary > .text-muted { font-size:26rpx; }
+.income-total { font-size:64rpx; line-height:1.3; font-weight:600; color:#14243a; letter-spacing:-1rpx; font-variant-numeric:tabular-nums; margin:12rpx 0; }
+.income-note { font-size:24rpx; color:#647084; }
+.section-heading { display:flex; justify-content:space-between; align-items:center; gap:16rpx; font-size:28rpx; padding:22rpx 0; border-bottom:1rpx solid #e5eaf1; font-weight:600; }
+.section-heading .text-muted { font-size:23rpx; font-weight:400; }
+.ledger-row { display:flex; align-items:flex-start; gap:22rpx; padding:28rpx 0; margin:0; border-radius:0; border-bottom:1rpx solid #e5eaf1; background:#fff; text-align:left; line-height:1.5; }
+.ledger-date { width:60rpx; flex-shrink:0; font-size:24rpx; color:#647084; padding-top:3rpx; font-variant-numeric:tabular-nums; }
+.ledger-main { min-width:0; flex:1; }
+.bank-line { display:flex; align-items:center; gap:10rpx; color:#647084; font-size:24rpx; }
+.bank-logo { width:28rpx; height:28rpx; flex-shrink:0; }
+.ledger-title { font-size:29rpx; color:#14243a; margin:8rpx 0; font-weight:500; }
+.ledger-period { font-size:23rpx; color:#647084; }
+.ledger-amount { color:#1764d9; font-size:27rpx; font-weight:600; font-variant-numeric:tabular-nums; flex-shrink:0; padding-top:3rpx; max-width:230rpx; overflow-wrap:anywhere; }
+.pending-note { background:#f2f6fc; padding:22rpx 24rpx; color:#50627a; font-size:26rpx; line-height:1.6; border-radius:12rpx; margin:10rpx 0 12rpx; }
+.pending-row { padding:26rpx 0; border-bottom:1rpx solid #e5eaf1; }
+.pending-open { width:100%; background:transparent; text-align:left; border-radius:0; padding:0; line-height:1.5; }
+.pending-period { margin-left:auto; font-size:23rpx; }
+.pending-title { font-size:32rpx; font-weight:600; color:#14243a; margin-top:10rpx; }
+.expected { color:#647084; font-size:24rpx; margin-top:10rpx; }
+.expected.late { color:#a8442c; }
+.pending-footer { margin-top:18rpx; gap:16rpx; }
+.pending-amount { color:#243b58; font-size:26rpx; font-variant-numeric:tabular-nums; }
+.small-primary { color:#1764d9; background:#edf4ff; min-height:48px; line-height:48px; border-radius:12rpx; margin:0; padding:0 24rpx; font-size:26rpx; }
+.small-primary::after { border:0; }
+.loading,.empty { padding:64rpx 12rpx; text-align:center; font-size:28rpx; line-height:1.65; }
+.empty-title { color:#14243a; font-size:32rpx; font-weight:600; margin-bottom:12rpx; }
+.empty button { margin-top:28rpx; }
+.load-more { min-height:48px; margin-top:12rpx; color:#1764d9; background:#fff; font-size:27rpx; }
