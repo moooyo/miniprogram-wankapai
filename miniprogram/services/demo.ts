@@ -1,4 +1,4 @@
-import type { Activity, Actor, Card, Commands, MutationResult, Participation } from '../../shared/contracts';
+import type { Activity, Actor, Card, Commands, Entitlement, EntitlementDraft, LoungeAccess, MutationResult, Participation } from '../../shared/contracts';
 import { banks } from '../../shared/catalog';
 import { MemoryStore, MemorySeed } from '../../domain/memory-store';
 import { createService } from '../../domain/service';
@@ -8,12 +8,71 @@ export const demoActor: Actor = {userId:'demo-user',isModerator:false,demo:true}
 const storageKey='card-benefits.native.demo.v1';
 let servicePromise: Promise<ReturnType<typeof createService>>|null=null;
 let memory: MemoryStore;
+
+function demoLounges(day: string): LoungeAccess[] {
+  return [
+    { id: 'demo-lounge-local', airportName: '示例国际机场', airportCode: 'ZZZ', city: '示例城市', loungeName: '示例银行贵宾厅', terminal: 'T1', zone: 'domestic',
+      supportedBanks: ['示例银行'], reservation: 'required', advanceHours: 4, reservationNote: '示例：通过权益平台预约，取得确认后到店。', customerScope: 'local_bank', customerNote: '仅限示例银行在示例城市开户的客户；此条件仅用于演示。',
+      guestNote: '携伴需另行核实，不能据此认定权益可转让。', openingHours: '08:00–22:00（演示）', location: '安检后，示例登机口旁', unitsPerVisit: 1,
+      sourceNote: '虚构示例，不代表真实机场、贵宾厅或准入规则。', verifiedOn: day },
+    { id: 'demo-lounge-international', airportName: '示例国际机场', airportCode: 'ZZZ', city: '示例城市', loungeName: '示例国际出发休息室', terminal: 'T2', zone: 'international',
+      supportedBanks: ['示例银行'], reservation: 'not_required', advanceHours: 0, reservationNote: '现场须核验当日登机牌及权益。', customerScope: 'specified', customerNote: '示例高端卡持卡人，需与登机牌姓名一致。',
+      guestNote: '本人和同行人各扣 1 次（示例）。', openingHours: '', location: '国际出发安检后', unitsPerVisit: 1,
+      sourceNote: '与同一演示权益共用次数，不代表真实准入。', verifiedOn: day },
+  ];
+}
+
+async function annotateUneditedDemoLounges(): Promise<boolean> {
+  const origins = await memory.find<{ ownerId: string; requestId: string; result?: MutationResult; createdAt: string }>('requests', {
+    where: [{ field: 'ownerId', op: 'eq', value: demoActor.userId }, { field: 'requestId', op: 'eq', value: 'demo-held-benefits-v1-0' }],
+  });
+  if (origins.length !== 1 || typeof origins[0].result?.id !== 'string') return false;
+  const record = await memory.get<Entitlement>('entitlements', origins[0].result.id);
+  if (!record || record.ownerId !== demoActor.userId || record.provider !== '演示银行' || record.kind !== 'lounge'
+    || record.createdAt !== origins[0].createdAt || !Array.isArray(record.lounges)) return false;
+  const created = new Date(record.createdAt);
+  if (!Number.isFinite(created.getTime())) return false;
+  const templates = demoLounges(todayCN(created));
+  let changed = false;
+  const lounges = record.lounges.map(item => {
+    if (!item || typeof item !== 'object' || Object.prototype.hasOwnProperty.call(item, 'supportedBanks')) return item;
+    const template = templates.find(candidate => candidate.id === item.id);
+    if (!template) return item;
+    const { supportedBanks: bankNames, ...legacy } = template;
+    const keys = Object.keys(legacy) as Array<keyof typeof legacy>;
+    if (Object.keys(item).length !== keys.length || !keys.every(key => Object.prototype.hasOwnProperty.call(item, key) && item[key] === legacy[key])) return item;
+    changed = true;
+    return { ...item, supportedBanks: [...bankNames!] };
+  });
+  if (changed) await memory.set('entitlements', record.id, { ...record, lounges });
+  return changed;
+}
+
+async function seedEntitlements(service: ReturnType<typeof createService>): Promise<void> {
+  const day = todayCN(new Date()), year = day.slice(0, 4);
+  const common = { cardId: '', provider: '演示银行', totalUses: 6, initialUsed: 2, startsOn: `${year}-01-01`, endsOn: `${year}-12-31`,
+    transferNote: '', notes: '个人手动记录示例，不代表任何真实银行权益。', lounges: [] };
+  const drafts: EntitlementDraft[] = [
+    { ...common, title: '机场贵宾厅（演示权益）', kind: 'lounge', transferability: 'grey', transferNote: '官方转让规则未明确，使用前请自行核实。', lounges: demoLounges(day) },
+    { ...common, title: '年度体检（演示权益）', kind: 'health_check', totalUses: 1, initialUsed: 0, transferability: 'not_allowed', notes: '示例：体检套餐与预约资格需向服务方核实。' },
+    { ...common, title: '洗车券（演示权益）', kind: 'other', totalUses: 3, initialUsed: 1, transferability: 'allowed', transferNote: '演示：规则明确允许赠予亲友。' },
+  ];
+  for (let index = 0; index < drafts.length; index++) {
+    await service.execute(demoActor, { action: 'entitlement.save', payload: { draft: drafts[index] }, requestId: `demo-held-benefits-v1-${index}` });
+  }
+}
 export async function demoService(): Promise<ReturnType<typeof createService>> {
   if(servicePromise)return servicePromise;
   servicePromise=(async()=>{
     let stored: {version:number;seed:MemorySeed}|null=null;
     try{stored=wx.getStorageSync(storageKey)||null;}catch{}
-    if(stored?.version===1){memory=new MemoryStore(stored.seed);return createService(memory,{demo:true});}
+    if(stored?.version===1){
+      memory=new MemoryStore(stored.seed);
+      const service=createService(memory,{demo:true});
+      if (!Object.prototype.hasOwnProperty.call(stored.seed, 'entitlements')) { await seedEntitlements(service); await persistDemo(); }
+      else if (await annotateUneditedDemoLounges()) await persistDemo();
+      return service;
+    }
     const now=new Date(), day=todayCN(now),year=day.slice(0,4),month=monthOf(day);
     const first=`${year}-01-01`,end=`${year}-12-31`,monthEnd=`${month}-${lastDay(Number(year),Number(month.slice(5)))}`;
     const activity=(id:string,bankId:string,overrides:Partial<Activity>={}):Activity=>({
@@ -44,11 +103,13 @@ export async function demoService(): Promise<ReturnType<typeof createService>> {
     await command('participation.progress',{participationId:annual.id,progress:0,registered:true});
     for(const [index,card] of cards.entries()){
       const dueOn=addDays(day,index+3);
-      await command('card.save',{...card,billing:{statementDay:6+index,dueDay:Number(dueOn.slice(8)),dueMonthOffset:dueOn.slice(0,7)>month?1:0,dueOn,remindDays:3}});
+      const statementDay=Math.min(6+index,Number(day.slice(8)));
+      await command('card.save',{...card,billing:{statementDay,dueDay:Number(dueOn.slice(8)),dueMonthOffset:dueOn.slice(0,7)>month?1:0,dueOn,remindDays:3}});
     }
     const previousDate=addMonths(day,-1), previousActivity={...activities[0],startsOn:`${Number(year)-1}-01-01`},period=periodFor(previousActivity,previousDate)!;
     const prior:Participation={id:'demo-prior-pending',ownerId:demoActor.userId,activityId:'monthly',activityRevision:1,periodKey:period.periodKey,startsOn:period.startsOn,endsOn:period.endsOn,scopeKey:'user',snapshot:previousActivity,stage:'completed',progress:3,registeredAt:previousDate,startedAt:previousDate,completedAt:previousDate,expectedOn:day,receivedOn:null,receivedMinor:null,version:1,createdAt:new Date(`${previousDate}T04:00:00Z`).toISOString(),updatedAt:now.toISOString()};
     await memory.set('participations',prior.id,prior);
+    await seedEntitlements(service);
     await persistDemo();
     return service;
   })();

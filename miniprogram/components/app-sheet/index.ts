@@ -3,6 +3,7 @@ import appConfig from '../../app.json';
 const tabRoutes = new Set(appConfig.tabBar.list.map(item => item.pagePath));
 const activeSheets = new Set<object>();
 const resizeHandlers = new WeakMap<object, () => void>();
+const measurementRevisions = new WeakMap<object, number>();
 let tabBarHidden = false;
 let restoringTabBar = false;
 let tabBarRevision = 0;
@@ -41,13 +42,15 @@ function updateTabBar(owner: object, visible: boolean) {
 
 Component({
   options: { multipleSlots: true },
-  properties: { show: { type: Boolean, value: false }, title: { type: String, value: '' } },
+  properties: { show: { type: Boolean, value: false }, title: { type: String, value: '' }, dismissible: { type: Boolean, value: true }, contentState: { type: Array, value: [] }, scrollIntoView: { type: String, value: '' } },
   data: { bodyHeight: 200 },
   observers: {
     show(visible: boolean) {
+      measurementRevisions.set(this, (measurementRevisions.get(this) || 0) + 1);
       updateTabBar(this, visible);
       if (visible) wx.nextTick(() => this.measure());
     },
+    'contentState.**, title'() { if (this.data.show) wx.nextTick(() => this.measure()); },
   },
   lifetimes: {
     attached() {
@@ -65,6 +68,7 @@ Component({
         resizeHandlers.delete(this);
       }
       updateTabBar(this, false);
+      measurementRevisions.delete(this);
     },
   },
   pageLifetimes: {
@@ -74,19 +78,22 @@ Component({
     },
     hide() {
       updateTabBar(this, false);
-      if (this.data.show) this.triggerEvent('close');
     },
     resize() { if (this.data.show) wx.nextTick(() => this.measure()); },
   },
   methods: {
-    close() { updateTabBar(this, false); this.triggerEvent('close'); }, stop() {},
+    close() { if (this.data.dismissible) this.triggerEvent('close'); }, stop() {},
     measure(){
+      if (!this.data.show) return;
+      const revision = (measurementRevisions.get(this) || 0) + 1;
+      measurementRevisions.set(this, revision);
       const info=wx.getWindowInfo?wx.getWindowInfo():wx.getSystemInfoSync();
       const query = this.createSelectorQuery();
       query.selectViewport().boundingClientRect();
       query.select('.sheet-content').boundingClientRect();
       query.select('.sheet-head').boundingClientRect();
       query.exec(results => {
+        if (!this.data.show || measurementRevisions.get(this) !== revision) return;
         const [viewport, content, header] = results;
         if (!content) return;
         const height = viewport?.height || info.windowHeight;

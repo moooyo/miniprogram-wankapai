@@ -1,1 +1,1 @@
-<view wx:if="{{visible}}" class="demo-notice">演示模式 · 活动和收益为示例数据</view>
+<view wx:if="{{visible}}" class="demo-notice">演示模式 · 当前记录为示例数据</view>

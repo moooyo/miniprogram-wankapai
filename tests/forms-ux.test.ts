@@ -180,17 +180,21 @@ test('card removal locks fields while the confirmation is open and releases them
   assert.equal(commands.length, 0);
 });
 
-test('correcting a card statement day preserves the missing due-date error and targets the first error', async () => {
+test('a card error summary links to the first error and correcting it preserves independent due-date errors', async () => {
   const instance = await initialize(0);
   instance.toggleReminder({ detail: { value: true } });
   assert.equal(instance.validate(), false);
   assert(instance.data.errors.statementDay);
   assert(instance.data.errors.dueOn);
+  assert.equal(scrollCalls.at(-1), '#card-error-summary');
+  assert.equal(instance.data.errorSummary[0].field, 'statementDay');
+  instance.focusErrorField({ currentTarget: { dataset: { field: instance.data.errorSummary[0].field } } });
   assert.equal(scrollCalls.at(-1), '#field-statementDay');
   instance.changeStatement({ detail: { value: '5' } });
   assert.equal(instance.data.errors.statementDay, undefined);
   assert(instance.data.errors.dueOn);
   assert(instance.data.errors.dueDay);
+  assert.deepEqual(instance.data.errorSummary.map((item: { field: string }) => item.field), ['dueOn', 'dueDay']);
 });
 
 test('progress conflict retains inputs and requires a separate save with the refreshed version', async () => {
@@ -226,6 +230,91 @@ test('progress conflict retains inputs and requires a separate save with the ref
   assert.equal(commands[1].payload.progress, 3);
   assert.equal(loadDraft('progress', 'forms-user', record.id), null);
 });
+
+for (const originallyRegistered of [true, false]) {
+  test(`a registration-only progress conflict from ${originallyRegistered ? 'registered to unregistered' : 'unregistered to registered'} remains visible and saves an explicit choice with the latest version`, async () => {
+    record = {
+      ...participation(), registeredAt: originallyRegistered ? '2026-09-01' : null,
+      snapshot: { ...activity, requiresRegistration: false },
+    };
+    const instance = await initialize(1);
+    assert.equal(instance.data.registered, originallyRegistered);
+    assert.equal(instance.data.showRegistration, originallyRegistered);
+    instance.onProgressInput({ detail: { value: '3' } });
+    commandHandler = async () => { throw Object.assign(new Error('Registration updated'), { code: 'VERSION_CONFLICT' }); };
+    await instance.save();
+    assert.equal(instance.data.conflict, true);
+    assert.deepEqual(commands[0], {
+      action: 'participation.progress',
+      payload: { participationId: record.id, progress: 3, registered: originallyRegistered, expectedVersion: 1 },
+    });
+    await instance.save();
+    assert.equal(commands.length, 1);
+
+    const latestRegistered = !originallyRegistered;
+    record = { ...record, registeredAt: latestRegistered ? '2026-09-22' : null, version: 2 };
+    await instance.reloadLatest();
+    assert.equal(instance.data.participation.progress, 2, 'The other session changed registration without changing progress.');
+    assert.equal(instance.data.participation.stage, 'in_progress', 'A registration-only change must be apparent even when the stage is unchanged.');
+    assert.equal(instance.data.participation.snapshot.requiresRegistration, false);
+    assert.equal(instance.data.participation.registeredAt, record.registeredAt);
+    assert.equal(instance.data.participation.version, 2);
+    assert.ok(instance.data.latestSummary.endsWith(latestRegistered ? '已报名' : '未报名'));
+    assert.equal(instance.data.progressInput, '3');
+    assert.equal(instance.data.registered, originallyRegistered, 'Refreshing must retain the local choice for the user to reconcile.');
+    assert.equal(instance.data.showRegistration, true, 'An optional registration difference must remain visible and editable.');
+    assert.equal(instance.data.editable, true);
+    assert.equal(instance.data.conflict, false);
+    assert.equal(instance.data.reapplyRequired, true);
+    assert.equal(commands.length, 1, 'Reading the latest record must not apply or submit either registration choice.');
+    assert.deepEqual(loadDraft<{ progressInput: string; registered: boolean }>('progress', 'forms-user', record.id)?.value, {
+      progressInput: '3', registered: originallyRegistered,
+    });
+
+    instance.onRegistrationChange({ detail: { value: latestRegistered ? ['registered'] : [] } });
+    assert.equal(instance.data.registered, latestRegistered);
+    assert.equal(instance.data.showRegistration, true, 'Clearing an optional registration choice must not remove its control.');
+    assert.equal(commands.length, 1, 'Editing the retained choice still requires a separate save.');
+    commandHandler = async () => ({ id: record.id, version: 3 });
+    await instance.save();
+    assert.deepEqual(commands[1], {
+      action: 'participation.progress',
+      payload: { participationId: record.id, progress: 3, registered: latestRegistered, expectedVersion: 2 },
+    });
+    assert.equal(loadDraft('progress', 'forms-user', record.id), null);
+  });
+}
+
+for (const draftRegistered of [true, false]) {
+  test(`recovering an optional registration draft keeps its ${draftRegistered ? 'checked' : 'unchecked'} choice visible beside the latest server state`, async () => {
+    const latestRegistered = !draftRegistered;
+    saveDraft('progress', 'forms-user', record.id, 1, { progressInput: '3', registered: draftRegistered });
+    record = {
+      ...participation(5), registeredAt: latestRegistered ? '2026-09-22' : null,
+      snapshot: { ...activity, requiresRegistration: false },
+    };
+    const instance = await initialize(1);
+    assert.equal(modalCalls.length, 1);
+    assert.match(modalCalls[0].content, /记录已有更新/);
+    assert.equal(instance.data.progressInput, '3');
+    assert.equal(instance.data.registered, draftRegistered);
+    assert.equal(instance.data.showRegistration, true);
+    assert.equal(instance.data.editable, true);
+    assert.equal(instance.data.reapplyRequired, true);
+    assert.ok(instance.data.latestSummary.endsWith(latestRegistered ? '已报名' : '未报名'));
+    assert.equal(instance.data.participation.registeredAt, record.registeredAt);
+    assert.equal(commands.length, 0, 'Draft recovery must never silently replace the server registration.');
+    instance.onRegistrationChange({ detail: { value: latestRegistered ? ['registered'] : [] } });
+    assert.equal(instance.data.registered, latestRegistered);
+    assert.equal(instance.data.showRegistration, true);
+    await instance.save();
+    assert.deepEqual(commands, [{
+      action: 'participation.progress',
+      payload: { participationId: record.id, progress: 3, registered: latestRegistered, expectedVersion: 5 },
+    }]);
+    assert.equal(loadDraft('progress', 'forms-user', record.id), null);
+  });
+}
 
 test('receipt conflict preserves amount and date while comparing the latest saved receipt', async () => {
   const instance = await initialize(2);
@@ -320,17 +409,36 @@ for (const scenario of [
     edit(oldPage, scenario.oldValue);
     const entityId = scenario.index === 1 ? oldPage.data.participationId : oldPage.data.draftEntityId;
     const pending = deferred<{ id: string; version: number }>();
-    commandHandler = () => pending.promise;
+    const dispatched = deferred<void>();
+    commandHandler = () => { dispatched.resolve(); return pending.promise; };
     const saving = oldPage.save();
+    await dispatched.promise;
+    const submittedRevision = getDraftRevision(scenario.scope, 'forms-user', entityId);
+    const submittedCard = scenario.index === 0 ? loadDraft<Record<string, unknown>>(scenario.scope, 'forms-user', entityId)?.value : null;
     oldPage.onUnload();
     const newPage = await initialize(scenario.index);
+    const restoredRevision = getDraftRevision(scenario.scope, 'forms-user', entityId);
+    if (scenario.index === 0) {
+      assert.notEqual(restoredRevision, submittedRevision, 'Recovery must renew a pending card draft even when its inputs remain unchanged.');
+      assert.deepEqual(loadDraft(scenario.scope, 'forms-user', entityId)?.value, submittedCard);
+      assert.equal(newPage.data.pendingCreationUnconfirmed, true);
+    }
     edit(newPage, scenario.newValue);
+    if (scenario.index === 0) {
+      assert.equal(newPage.data.nickname, scenario.oldValue, 'A recovered unknown creation keeps its original fields locked.');
+      assert.equal(getDraftRevision(scenario.scope, 'forms-user', entityId), restoredRevision, 'The new revision must come from recovery, not an attempted edit.');
+    }
     const newRevision = getDraftRevision(scenario.scope, 'forms-user', entityId);
     const priorNavigation = navigationCalls, priorDisabled = disabledAlertCalls;
     pending.resolve({ id: record.id, version: 2 });
     await saving;
     const saved = loadDraft<Record<string, string>>(scenario.scope, 'forms-user', entityId);
-    assert.equal(saved?.value[scenario.field], scenario.newValue);
+    assert.equal(saved?.value[scenario.field], scenario.index === 0 ? scenario.oldValue : scenario.newValue);
+    if (scenario.index === 0) {
+      assert.deepEqual(saved?.value, submittedCard, 'A late result must preserve the reopened original payload and its pending metadata.');
+      assert.equal(newPage.data.pendingCreationUnconfirmed, true);
+      assert.equal(commands.length, 1);
+    }
     assert.equal(getDraftRevision(scenario.scope, 'forms-user', entityId), newRevision);
     assert.equal(navigationCalls, priorNavigation);
     assert.equal(disabledAlertCalls, priorDisabled);

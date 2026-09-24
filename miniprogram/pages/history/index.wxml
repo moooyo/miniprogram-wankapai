@@ -1,20 +1,34 @@
 <view class="history-page" aria-hidden="{{showAudit}}">
-  <view class="history-intro"><text class="history-description">{{activityId ? '当前活动各期记录' : '全部活动、全部周期，包含已跳过和已过期的记录'}}。点击记录可查看详情、更正或恢复；返现按实际到账日期、优惠按实际享受日期计入。</text></view>
+  <view class="history-intro">
+    <view class="history-intro-head">
+      <text class="history-scope">{{activityId ? '当前活动 · 全部周期' : '全部活动 · 全部周期'}}</text>
+      <button class="history-help" bindtap="toggleRecordHelp" aria-expanded="{{showRecordHelp}}" aria-controls="history-record-help">{{showRecordHelp ? '收起说明' : '记录说明'}}</button>
+    </view>
+    <text wx:if="{{showRecordHelp}}" id="history-record-help" class="history-description">{{activityId ? '当前活动各期记录' : '全部活动、全部周期，包含已跳过和已过期的记录'}}。点击记录可查看详情、更正或恢复；返现按实际到账日期、优惠按实际享受日期计入。</text>
+  </view>
   <view class="history-tabs"><button class="history-tab {{filter === 'all' ? 'is-selected' : ''}}" data-filter="all" bindtap="chooseFilter" aria-pressed="{{filter === 'all'}}">全部</button><button class="history-tab {{filter === 'unfinished' ? 'is-selected' : ''}}" data-filter="unfinished" bindtap="chooseFilter" aria-pressed="{{filter === 'unfinished'}}">未完成</button><button class="history-tab {{filter === 'pending' ? 'is-selected' : ''}}" data-filter="pending" bindtap="chooseFilter" aria-pressed="{{filter === 'pending'}}">待确认</button></view>
-  <view wx:if="{{loading}}" class="state-block">正在加载记录…</view>
-  <view wx:elif="{{error}}" class="state-block"><text>{{error}}</text><button class="button secondary" bindtap="retry">重新加载</button></view>
+  <view wx:if="{{loading && !items.length}}" class="state-block" role="status">正在加载记录…</view>
+  <view wx:elif="{{error && !items.length}}" class="state-block" role="alert"><text>{{error}}</text><button class="button secondary" bindtap="retry">重新加载</button></view>
   <block wx:else>
+    <text wx:if="{{loading}}" class="list-notice" role="status">正在更新记录，已显示的内容仍可查看…</text>
+    <view wx:elif="{{error}}" class="list-notice" role="alert"><text>{{error}}当前显示上次加载的内容。</text><button class="button secondary" bindtap="retry">重新加载</button></view>
     <view wx:for="{{items}}" wx:key="id" class="history-record">
-      <button class="record-main" data-id="{{item.id}}" data-activity="{{item.activityId}}" bindtap="openRecord"><view class="record-period"><text>{{item.period}}</text><text class="record-stage {{item.stage === 'received' ? 'received' : ''}}">{{item.stageLabel}}</text></view><view class="record-title"><image src="{{item.logo}}" class="bank-logo" mode="aspectFit" aria-hidden="true"/><text>{{item.title}}</text></view><text wx:if="{{item.cardName}}" class="record-card">{{item.cardName}}</text><view class="record-value"><text>{{item.amountLabel}}</text><text class="amount">{{item.amount}}</text><text class="chevron" aria-hidden="true">›</text></view><text wx:if="{{item.receivedOn}}" class="record-note">{{item.dateLabel}} {{item.receivedOn}}</text><text wx:elif="{{item.expectedOn && item.stage === 'completed'}}" class="record-note">预计 {{item.expectedOn}} {{item.dateEvent}}</text><text wx:elif="{{item.stage !== 'skipped' && item.stage !== 'completed'}}" class="record-note">进度 {{item.progress}} · {{item.endsOn}} 截止</text></button>
-      <button class="audit-link" data-id="{{item.id}}" data-activity="{{item.activityId}}" data-title="{{item.period}} · {{item.title}}" bindtap="openAudit">操作记录</button>
+      <button class="record-main" data-id="{{item.id}}" data-activity="{{item.activityId}}" bindtap="openRecord"><view class="record-period"><text>{{item.period}}</text><text class="record-stage {{item.stage === 'received' ? 'received' : ''}}">{{item.stageLabel}}</text></view><view class="record-title"><image src="{{item.logo}}" class="bank-logo" mode="aspectFit" aria-hidden="true"/><text>{{item.bankName ? item.bankName + ' · ' : ''}}{{item.title}}</text></view><text wx:if="{{item.cardName}}" class="record-card">{{item.cardName}}</text><view class="record-value"><text>{{item.amountLabel}}</text><text class="amount">{{item.amount}}</text><text class="chevron" aria-hidden="true">›</text></view></button>
+      <view class="record-footer">
+        <text wx:if="{{item.receivedOn}}" class="record-note">{{item.dateLabel}} {{item.receivedOn}}</text>
+        <text wx:elif="{{item.expectedOn && item.stage === 'completed'}}" class="record-note">预计 {{item.expectedOn}} {{item.dateEvent}}</text>
+        <text wx:elif="{{item.stage !== 'skipped' && item.stage !== 'completed'}}" class="record-note">进度 {{item.progress}} · {{item.endsOn}} 截止</text>
+        <button class="audit-link" data-id="{{item.id}}" data-activity="{{item.activityId}}" data-title="{{item.period}} · {{item.title}}" bindtap="openAudit">操作记录</button>
+      </view>
     </view>
     <view wx:if="{{!items.length}}" class="state-block"><text class="empty-title">{{filter === 'pending' ? '暂无待确认记录' : filter === 'unfinished' ? '暂无未完成记录' : '还没有参与记录'}}</text><text>参加活动后，每期进度和结果会保存在这里。</text></view>
-    <button wx:if="{{cursor}}" class="more-button" loading="{{loadingMore}}" disabled="{{loadingMore}}" bindtap="loadMore">{{loadingMore ? '加载中' : '查看更多记录'}}</button>
+    <text wx:if="{{loadMoreError}}" class="list-notice" role="alert">{{loadMoreError}}</text>
+    <button wx:if="{{cursor}}" class="more-button" loading="{{loadingMore}}" disabled="{{loading || loadingMore}}" bindtap="loadMore">{{loadingMore ? '加载中' : loadMoreError ? '重试加载更多' : '查看更多记录'}}</button>
   </block>
 </view>
-<app-sheet id="history-audit" show="{{showAudit}}" title="操作记录" bindclose="closeAudit">
+<app-sheet id="history-audit" show="{{showAudit}}" title="操作记录" content-state="{{[auditLoading, auditError, audit, auditTitle]}}" bindclose="closeAudit">
   <text class="audit-caption">{{auditTitle}}</text>
-  <text wx:if="{{auditLoading}}" class="audit-caption">正在加载…</text>
-  <text wx:elif="{{auditError}}" class="audit-caption">{{auditError}}</text>
+  <text wx:if="{{auditLoading}}" class="audit-caption" role="status">正在加载…</text>
+  <view wx:elif="{{auditError}}" class="audit-caption" role="alert"><text>{{auditError}}</text><button class="button secondary" bindtap="loadAudit">重新加载</button></view>
   <block wx:else><view wx:for="{{audit}}" wx:key="id" class="audit-row"><view><text>{{item.label}}</text><text wx:if="{{item.description}}" class="audit-description">{{item.description}}</text></view><text class="audit-date">{{item.at}}</text></view><text wx:if="{{!audit.length}}" class="audit-caption">还没有操作记录。</text></block>
 </app-sheet>

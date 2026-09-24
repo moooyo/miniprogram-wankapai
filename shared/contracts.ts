@@ -60,6 +60,30 @@ export interface Card {
   kind: 'credit' | 'debit'; nickname: string; billingAccountId?: string;
   createdAt: string; archivedAt?: string;
 }
+export type EntitlementKind = 'lounge' | 'health_check' | 'other';
+// Grey transferability records unofficial reports that still require verification.
+export type Transferability = 'allowed' | 'grey' | 'not_allowed';
+export interface LoungeAccess {
+  id: string; airportName: string; airportCode: string; city: string; loungeName: string; terminal: string;
+  supportedBanks?: string[];
+  zone: 'domestic' | 'international' | 'both' | 'unknown';
+  reservation: 'required' | 'not_required' | 'unknown'; advanceHours: number; reservationNote: string;
+  customerScope: 'all' | 'local_bank' | 'specified' | 'unknown'; customerNote: string; guestNote: string;
+  openingHours: string; location: string; unitsPerVisit: number; sourceNote: string; verifiedOn: string;
+}
+export interface EntitlementDraft {
+  title: string; kind: EntitlementKind; cardId: string; provider: string; totalUses: number; initialUsed: number;
+  startsOn: string; endsOn: string; transferability: Transferability; transferNote: string; notes: string; lounges: LoungeAccess[];
+}
+export interface Entitlement extends EntitlementDraft {
+  id: string; ownerId: string; usedUses: number; version: number; createdAt: string; updatedAt: string; archivedAt: string | null;
+}
+export interface EntitlementUsage {
+  id: string; ownerId: string; entitlementId: string; quantity: number; usedOn: string; note: string;
+  loungeId: string; loungeName: string; reversedAt: string | null; createdAt: string;
+}
+export interface EntitlementList { today: string; items: Entitlement[]; cards: Card[]; }
+export interface EntitlementDetail { today: string; entitlement: Entitlement; usages: EntitlementUsage[]; cards: Card[]; }
 export interface BillingAccount {
   id: string; ownerId: string; bankId: string; issuerId: string; label: string;
   statementDay: number; dueDay: number; dueMonthOffset: 0 | 1;
@@ -118,10 +142,13 @@ export interface RewardsView {
 
 export interface Queries {
   'session.get': { input: Record<string, never>; output: Session };
+  'request.replay': { input: CommandRequest; output: MutationResult };
   'catalog.list': { input: { bankId?: string; mineOnly?: boolean; cursor?: string; limit?: number }; output: PageResult<ActivityItem> };
-  'activity.get': { input: { activityId?: string; participationId?: string }; output: Detail };
+  'activity.get': { input: { activityId?: string; participationId?: string; cardId?: string }; output: Detail };
   'dashboard.get': { input: Record<string, never>; output: Dashboard };
   'wallet.get': { input: Record<string, never>; output: Wallet };
+  'entitlements.list': { input: Record<string, never>; output: EntitlementList };
+  'entitlement.get': { input: { id: string }; output: EntitlementDetail };
   'rewards.get': { input: { month?: string; currency?: Currency; cursor?: string; limit?: number }; output: RewardsView };
   'history.list': { input: { activityId?: string; filter?: 'all' | 'pending' | 'unfinished'; cursor?: string; limit?: number }; output: PageResult<Participation> };
   'submissions.list': { input: { moderation?: boolean; status?: SubmissionStatus; cursor?: string; limit?: number }; output: PageResult<Submission> };
@@ -138,10 +165,14 @@ export interface Commands {
   'participation.undoComplete': { participationId: string };
   'participation.skip': { participationId: string; skipped: boolean };
   'participation.expected': { participationId: string; expectedOn: string | null };
-  'reward.confirm': { activityId?: string; participationId?: string; cardId?: string; amountMinor: number; receivedOn: string; expectedVersion?: number };
+  'reward.confirm': { activityId?: string; participationId?: string; cardId?: string; amountMinor: number; receivedOn: string; expectedVersion?: number; expectNew?: boolean; expectedPeriodKey?: string };
   'reward.revoke': { participationId: string };
-  'card.save': { id?: string; bankId: string; issuerId: string; network: Network; kind: 'credit' | 'debit'; nickname: string; billingAccountId?: string | null; billing?: { statementDay: number; dueDay: number; dueMonthOffset: 0 | 1; dueOn: string; remindDays: number } | null };
+  'card.save': { id?: string; bankId: string; issuerId: string; network: Network; kind: 'credit' | 'debit'; nickname: string; billingAccountId?: string | null; billing?: { statementDay: number; dueDay: number; dueMonthOffset: 0 | 1; dueOn?: string; billId?: string; periodKey?: string; remindDays: number } | null };
   'card.remove': { id: string };
+  'entitlement.save': { id?: string; draft: EntitlementDraft; expectedVersion?: number };
+  'entitlement.use': { id: string; quantity: number; usedOn: string; note?: string; loungeId?: string; expectedVersion: number };
+  'entitlement.undo': { id: string; expectedVersion: number };
+  'entitlement.archive': { id: string; archived: boolean; expectedVersion: number };
   'bill.update': { id: string; dueOn?: string; paid?: boolean };
   'submission.save': { id?: string; draft: ActivityDraft; expectedVersion?: number };
   'submission.lead.save': { id?: string; lead: ActivityLead; expectedVersion?: number };

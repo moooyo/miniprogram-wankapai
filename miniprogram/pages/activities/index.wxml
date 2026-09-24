@@ -19,10 +19,12 @@
     </view>
   </view>
   <view class="activity-content">
-    <view class="feed-heading"><text class="section-title">{{bankName}}</text><view class="feed-actions"><button class="text-button subscribe-button" bindtap="onSubscribe">订阅新活动</button><button class="text-button" bindtap="submitActivity">投稿</button></view></view>
-    <view wx:if="{{loading}}" class="state-block"><text>正在加载活动…</text></view>
-    <view wx:elif="{{error}}" class="state-block"><text>{{error}}</text><button class="button secondary" bindtap="retry">重新加载</button></view>
+    <view class="feed-heading"><text class="section-title">{{bankName}}</text><view class="feed-actions"><button class="text-button subscribe-button" bindtap="onSubscribe" loading="{{subscribeBusy}}" disabled="{{subscribeBusy}}">订阅新活动</button><button class="text-button" bindtap="submitActivity">投稿</button></view></view>
+    <view wx:if="{{loading && !items.length}}" class="state-block" role="status"><text>正在加载活动…</text></view>
+    <view wx:elif="{{error && !items.length}}" class="state-block" role="alert"><text>{{error}}</text><button class="button secondary" bindtap="retry">重新加载</button></view>
     <block wx:else>
+      <text wx:if="{{loading}}" class="list-notice" role="status">正在更新活动，已显示的内容仍可查看…</text>
+      <view wx:elif="{{error}}" class="list-notice" role="alert"><text>{{error}}当前显示上次加载的内容。</text><button class="text-button" bindtap="retry">重新加载</button></view>
       <view wx:for="{{items}}" wx:key="id" class="activity-tile">
         <button class="offer-heading" data-id="{{item.id}}" data-participation="{{item.participationId}}" bindtap="openActivity">
           <view class="offer-bank"><image class="bank-logo-small" src="{{item.logo}}" mode="aspectFit" aria-hidden="true"/><text>{{item.bankName}}</text><text class="period-label">{{item.frequencyLabel}}</text></view>
@@ -34,16 +36,17 @@
         <view class="tile-bottom"><view class="tile-reward"><text class="reward-value">{{item.reward}}</text><text class="reward-label">{{item.rewardLabel}}</text></view><button class="tile-action" data-id="{{item.id}}" data-participation="{{item.participationId}}" bindtap="openActivity">{{item.actionLabel}}<text aria-hidden="true"> ›</text></button></view>
       </view>
       <view wx:if="{{!items.length}}" class="state-block"><text class="empty-title">暂无匹配的活动</text><text>可以查看其他活动，或补充你持有的卡片。</text><button class="button secondary" bindtap="clearFilters">查看全部活动</button><button class="text-button" bindtap="addCard">管理我的卡包</button></view>
-      <button wx:if="{{cursor}}" class="more-button" bindtap="loadMore" loading="{{loadingMore}}" disabled="{{loadingMore}}">{{loadingMore ? '加载中' : '查看更多活动'}}</button>
+      <text wx:if="{{loadMoreError}}" class="list-notice" role="alert">{{loadMoreError}}</text>
+      <button wx:if="{{cursor}}" class="more-button" bindtap="loadMore" loading="{{loadingMore}}" disabled="{{loading || loadingMore}}">{{loadingMore ? '加载中' : loadMoreError ? '重试加载更多' : '查看更多活动'}}</button>
       <text wx:elif="{{items.length}}" class="feed-end">已显示当前筛选下的全部活动</text>
     </block>
   </view>
 </view>
-<app-sheet id="bank-picker" show="{{showBanks}}" title="全部银行" bindclose="closeBanks">
+<app-sheet id="bank-picker" show="{{showBanks}}" title="全部银行" content-state="{{[filteredBanks, bankSearch, bankId]}}" bindclose="closeBanks">
   <input class="bank-search" value="{{bankSearch}}" placeholder="搜索银行名称" bindinput="searchBanks" confirm-type="search" aria-label="搜索银行名称"/>
   <view class="bank-grid">
-    <button wx:if="{{!bankSearch}}" class="bank-grid-choice {{bankId === '' ? 'is-selected' : ''}}" data-id="" bindtap="chooseBank"><view class="all-bank-mark">全</view><text>全部银行</text></button>
-    <button wx:for="{{filteredBanks}}" wx:key="id" class="bank-grid-choice {{bankId === item.id ? 'is-selected' : ''}}" data-id="{{item.id}}" bindtap="chooseBank"><image class="bank-logo" src="{{item.logo}}" mode="aspectFit" aria-hidden="true"/><text>{{item.name}}</text></button>
+    <button wx:if="{{!bankSearch}}" class="bank-grid-choice {{bankId === '' ? 'is-selected' : ''}}" data-id="" bindtap="chooseBank" aria-pressed="{{bankId === ''}}"><view class="all-bank-mark">全</view><text>全部银行</text></button>
+    <button wx:for="{{filteredBanks}}" wx:key="id" class="bank-grid-choice {{bankId === item.id ? 'is-selected' : ''}}" data-id="{{item.id}}" bindtap="chooseBank" aria-pressed="{{bankId === item.id}}"><image class="bank-logo" src="{{item.logo}}" mode="aspectFit" aria-hidden="true"/><text>{{item.name}}</text></button>
   </view>
   <text wx:if="{{!filteredBanks.length}}" class="search-empty">没有找到这家银行，试试简称。</text>
 </app-sheet>

@@ -1,5 +1,5 @@
 import { Bill, BillingAccount, Card, Commands, MutationResult, Network, Wallet } from '../shared/contracts';
-import { assertDate, billDates, monthOf } from './calendar';
+import { assertDate, assertMonth, billDates, monthOf } from './calendar';
 import { Context } from './context';
 import { DomainError, requireValue } from './errors';
 import { banks, issuers } from '../shared/catalog';
@@ -51,7 +51,12 @@ function readBilling(value: NonNullable<Commands['card.save']['billing']>): Omit
   requireValue(value.dueMonthOffset === 0 || value.dueMonthOffset === 1, 'INVALID_INPUT', '请选择本月或下月还款', 'dueMonthOffset');
   requireValue(value.dueMonthOffset !== 0 || dueDay >= statementDay, 'INVALID_INPUT', '同月还款日不能早于账单日，请选择下月还款', 'dueMonthOffset');
   requireValue(typeof value.remindDays === 'number' && Number.isInteger(value.remindDays) && value.remindDays >= 0 && value.remindDays <= 30, 'INVALID_INPUT', '提前提醒天数应为 0 至 30 天', 'remindDays');
-  assertDate(value.dueOn, 'dueOn');
+  if (value.dueOn !== undefined) assertDate(value.dueOn, 'dueOn');
+  if (value.periodKey !== undefined) assertMonth(value.periodKey, 'periodKey');
+  if (value.billId !== undefined) {
+    validId(value.billId, 'billId');
+    requireValue(value.dueOn !== undefined && value.periodKey !== undefined, 'INVALID_INPUT', '修正账单日期时需要指定账单及所属月份', 'dueOn');
+  }
   return { statementDay, dueDay, dueMonthOffset: value.dueMonthOffset, remindDays: value.remindDays };
 }
 
@@ -141,6 +146,7 @@ export async function saveCard(ctx: Context, payload: Commands['card.save']): Pr
   let accountId = cancelBilling ? undefined : previous?.billingAccountId;
   let account: BillingAccount | undefined;
   let correctedDueOn: string | undefined;
+  let correctedBill: Bill | undefined;
   if (!cancelBilling && requestedAccount) {
     const existing = await ctx.owned<BillingAccount>('billing_accounts', requestedAccount);
     requireValue(existing.bankId === bankId && existing.issuerId === issuerId, 'INVALID_INPUT', '只能共用同一家发卡机构的账单', 'billingAccountId');
@@ -154,8 +160,18 @@ export async function saveCard(ctx: Context, payload: Commands['card.save']): Pr
     const canReuse = previousAccount && otherCards.length === 0;
     accountId = canReuse ? previousAccount.id : ctx.newId('account');
     account = { id: accountId, ownerId: ctx.actor.userId, bankId, issuerId, label: nickname || '信用卡账单', ...settings, enabled: true };
-    const existingBill = canReuse ? await currentBill(ctx, accountId) : undefined;
-    correctedDueOn = checkDueOn(payload.billing.dueOn, existingBill?.statementOn || billDates(account, monthOf(ctx.today)).statementOn);
+    if (payload.billing.dueOn !== undefined) {
+      if (payload.billing.billId !== undefined) {
+        correctedBill = await ctx.owned<Bill>('bills', payload.billing.billId);
+        requireValue(canReuse && correctedBill.billingAccountId === accountId && correctedBill.periodKey === payload.billing.periodKey,
+          'VERSION_CONFLICT', '账单关联已变化，请重新读取后再修正日期', 'dueOn');
+      } else {
+        requireValue(payload.billing.periodKey === undefined || payload.billing.periodKey === monthOf(ctx.today),
+          'VERSION_CONFLICT', '账单月份已变化，请重新读取本期账单后再保存', 'dueOn');
+        correctedBill = canReuse ? await currentBill(ctx, accountId) : undefined;
+      }
+      correctedDueOn = checkDueOn(payload.billing.dueOn, correctedBill?.statementOn || billDates(account, monthOf(ctx.today)).statementOn);
+    }
   } else if (!cancelBilling && accountId) {
     const existing = await ctx.owned<BillingAccount>('billing_accounts', accountId);
     requireValue(existing.bankId === bankId && existing.issuerId === issuerId, 'INVALID_INPUT', '账单账户与卡片不匹配', 'billingAccountId');
@@ -174,7 +190,7 @@ export async function saveCard(ctx: Context, payload: Commands['card.save']): Pr
   if (previous?.billingAccountId && previous.billingAccountId !== accountId) await disableUnusedAccount(ctx, previous.billingAccountId);
   if (accountId) await ensureBills(ctx, 1, accountId);
   if (accountId && correctedDueOn !== undefined) {
-    const bill = await currentBill(ctx, accountId);
+    const bill = correctedBill || await currentBill(ctx, accountId);
     if (!bill) throw new DomainError('CONFLICT', '未能生成本期账单，请重试');
     if (bill.dueOn !== correctedDueOn) {
       const updated = { ...bill, dueOn: correctedDueOn };

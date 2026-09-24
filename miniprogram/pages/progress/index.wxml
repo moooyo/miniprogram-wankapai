@@ -3,6 +3,7 @@
   <view wx:elif="{{loadError}}" class="entry-state">
     <view class="entry-error">{{loadError}}</view>
     <button class="entry-secondary" bindtap="load">重新加载</button>
+    <button class="entry-secondary" bindtap="back">返回活动</button>
   </view>
   <block wx:else>
     <view class="entry-context">
@@ -13,7 +14,7 @@
     <view wx:if="{{!editable}}" class="entry-notice">这期记录的状态为「{{recordStatus}}」。如需更正，请先返回详情调整状态。</view>
     <view wx:if="{{conflict || reapplyRequired}}" id="record-conflict" class="entry-notice">
       <view>{{conflict ? '记录已更新，你的输入仍然保留。' : latestSummary}}</view>
-      <view wx:if="{{reapplyRequired}}">下方是你的填写内容，请核对后重新应用。</view>
+      <view wx:if="{{reapplyRequired}}">下方保留你的进度与报名选择（{{registered ? '已报名' : '未报名'}}）。请核对最新记录，调整后点击「重新应用并保存」。</view>
       <button wx:if="{{conflict}}" class="entry-secondary" bindtap="reloadLatest" loading="{{reloading}}" disabled="{{reloading}}">读取最新记录</button>
     </view>
     <view class="entry-field" id="progress-field">

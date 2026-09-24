@@ -1,4 +1,4 @@
-export type Collection = 'activities' | 'activity_revisions' | 'submissions' | 'cards' | 'billing_accounts' | 'bills' | 'trackings' | 'participations' | 'rewards' | 'assets' | 'audit_events' | 'preferences' | 'requests' | 'reminder_jobs' | 'reminder_grants';
+export type Collection = 'activities' | 'activity_revisions' | 'submissions' | 'cards' | 'billing_accounts' | 'bills' | 'trackings' | 'participations' | 'rewards' | 'assets' | 'audit_events' | 'preferences' | 'requests' | 'reminder_jobs' | 'reminder_grants' | 'entitlements' | 'entitlement_usages';
 export interface Condition { field: string; op: 'eq' | 'ne' | 'lt' | 'lte' | 'gt' | 'gte' | 'in'; value: unknown; }
 export interface FindOptions { where?: Condition[]; orderBy?: { field: string; direction: 'asc' | 'desc' }[]; offset?: number; limit?: number; }
 export interface Store {

@@ -1,2 +1,11 @@
-<web-view wx:if="{{url}}" src="{{url}}"></web-view>
-<view wx:else class="page"><view class="empty">{{error}}</view><button bindtap="goBack">返回活动</button></view>
+<web-view wx:if="{{url}}" src="{{url}}" bindload="loaded" binderror="failed"></web-view>
+<view wx:else class="web-entry-page">
+  <view class="entry-state">
+    <text class="entry-title">{{loading ? '正在打开活动网页' : '暂时无法打开网页'}}</text>
+    <text class="entry-copy" role="alert">{{error || '请稍候，正在连接银行活动入口。'}}</text>
+    <text wx:if="{{sourceUrl}}" class="entry-url" selectable>{{sourceUrl}}</text>
+    <button wx:if="{{canRetry}}" class="primary" bindtap="retry" loading="{{loading}}" disabled="{{loading}}">{{loading ? '正在打开' : '重新打开网页'}}</button>
+    <button wx:if="{{sourceUrl}}" class="secondary" bindtap="copyUrl">复制网页地址</button>
+    <button class="back-button" bindtap="goBack">返回活动</button>
+  </view>
+</view>

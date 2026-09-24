@@ -78,8 +78,11 @@ function harness(route: 'review' | 'submission-edit' | 'submission-lead' | 'subm
     '../../../shared/catalog': catalog,
     '../../../domain/validation': validation,
     '../../services/form-draft': drafts,
+    '../../services/navigation': { navigateBackOr: () => { effects.push('navigateBack'); } },
   });
-  return { page, commands, modals, scrolls, storage, effects, navigations, setModalAnswer: (answer: Promise<{ confirm: boolean }>) => { modalAnswer = answer; } };
+  return { page, commands, modals, scrolls, storage, effects, navigations,
+    formDrafts: drafts as { saveDraft: (...args: any[]) => boolean; loadDraft: (...args: any[]) => any },
+    setModalAnswer: (answer: Promise<{ confirm: boolean }>) => { modalAnswer = answer; } };
 }
 
 test('review ignores pagination from a status that has been replaced', async () => {
@@ -118,11 +121,13 @@ test('an obsolete review request cannot clear a newer loading state or show its 
   assert.equal(page.data.items[0].id, 'latest');
 });
 
-test('submission validation locates the actual field after rendering and retains independent errors', async () => {
+test('submission validation links its error summary to fields and retains independent errors', async () => {
   const { page, scrolls } = harness('submission-edit');
   await page.load();
   page.setData({ draft: { ...validDraft(), conditions: '', sourceUrl: '' }, targetText: '1', rewardText: '', openSection: 'source' });
   assert.equal(page.validate(), false);
+  assert.equal(scrolls.at(-1)?.selector, '#validation-summary');
+  page.goToError({ currentTarget: { dataset: { field: 'conditions' } } });
   assert.deepEqual(scrolls.at(-1), { selector: '#field-conditions', section: 'basic', afterRender: true });
   assert.ok(page.data.errors.conditions);
   assert.ok(page.data.errors.rewardText);
@@ -234,18 +239,33 @@ for (const operation of ['save', 'returnSubmission'] as const) {
         first.page.setData({ draft: validDraft(), targetText: '1', rewardText: '20' });
         first.page.input(input('title', 'First editor draft'));
       } else first.page.input(input('reviewNote', 'First editor review note'));
-      const savedAtRequest = structuredClone([...first.storage.values()][0]);
       const saving = first.page[operation]();
       assert.equal(first.commands.length, 1);
+      assert.equal(first.page.data.saving, true);
+      // Capture after the creation intent is persisted and the command has begun.
+      const savedAtRequest = structuredClone([...first.storage.values()][0]);
+      if (operation === 'save') assert.equal((savedAtRequest as { value: { intentKey?: string } }).value.intentKey, first.page.creationIntentKey);
       first.page.onHide();
       assert.deepEqual([...first.storage.values()][0], savedAtRequest, 'Hiding an in-flight editor must not advance its draft revision.');
       first.page.onUnload();
       const originalEffects = first.effects.slice();
       const reopened = harness('submission-edit', { storage: first.storage });
       if (operation === 'returnSubmission') reopened.page.setData({ reviewMode: true, submissionId: 's-1' });
+      else reopened.setModalAnswer(Promise.resolve({ confirm: false }));
       await reopened.page.load();
       reopened.page.input(input('title', 'New editor draft that must survive'));
+      if (operation === 'save') {
+        assert.equal(reopened.modals.length, 0, 'A pending creation must recover automatically without an abandonment prompt.');
+        assert.equal(reopened.page.data.pendingCreationUnconfirmed, true);
+        assert.equal(reopened.page.data.draft.title, 'First editor draft', 'Pending creation content must remain locked.');
+        const saved = reopened.formDrafts.loadDraft('submission', 'user-1', 'new');
+        assert.equal(reopened.formDrafts.saveDraft('submission', 'user-1', 'new', saved.baseVersion, {
+          ...saved.value, draft: { ...saved.value.draft, title: 'New editor draft that must survive' },
+        }), true);
+        assert.notEqual(reopened.formDrafts.loadDraft('submission', 'user-1', 'new').revision, saved.revision);
+      }
       const newerDraft = structuredClone([...first.storage.values()][0]);
+      const reopenedError = reopened.page.data.error;
       if (outcome === 'success') pending.resolve({ id: 's-1' });
       else pending.reject({ code: 'VERSION_CONFLICT', message: 'Server content changed' });
       await saving;
@@ -253,9 +273,10 @@ for (const operation of ['save', 'returnSubmission'] as const) {
       first.page.onUnload();
       assert.deepEqual([...first.storage.values()][0], newerDraft);
       assert.deepEqual(first.effects, originalEffects);
-      assert.equal(reopened.page.data.draft.title, 'New editor draft that must survive');
+      assert.equal(reopened.page.data.draft.title, operation === 'save' ? 'First editor draft' : 'New editor draft that must survive');
+      if (operation === 'save') assert.equal(reopened.formDrafts.loadDraft('submission', 'user-1', 'new').value.draft.title, 'New editor draft that must survive');
       assert.equal(reopened.page.data.conflict, false);
-      assert.equal(reopened.page.data.error, '');
+      assert.equal(reopened.page.data.error, reopenedError, 'An obsolete response must not replace the active editor feedback.');
       assert.equal(first.page.data.conflict, false);
     });
   }
@@ -272,10 +293,18 @@ test('a late submission with no original draft cannot remove a newly created dra
   const reopened = harness('submission-edit', { storage: first.storage });
   await reopened.page.load();
   reopened.page.input(input('title', 'Newly created local lead'));
+  assert.equal(reopened.page.data.pendingCreationUnconfirmed, true);
+  assert.equal(reopened.page.data.draft.title, 'Weekend offer');
+  const saved = reopened.formDrafts.loadDraft('submission', 'user-1', 'new');
+  assert.equal(reopened.formDrafts.saveDraft('submission', 'user-1', 'new', saved.baseVersion, {
+    ...saved.value, draft: { ...saved.value.draft, title: 'Newly created local lead' },
+  }), true);
+  assert.notEqual(reopened.formDrafts.loadDraft('submission', 'user-1', 'new').revision, saved.revision);
   const newerDraft = structuredClone([...first.storage.values()][0]);
   pending.resolve({ id: 's-1' });
   await saving;
   assert.deepEqual([...first.storage.values()][0], newerDraft);
+  assert.equal(reopened.formDrafts.loadDraft('submission', 'user-1', 'new').value.draft.title, 'Newly created local lead');
   assert.equal(first.effects.includes('navigateBack'), false);
 });
 
@@ -457,15 +486,25 @@ for (const outcome of ['success', 'failure'] as const) {
     first.page.onUnload();
     const effects = first.effects.slice();
     const reopened = harness('submission-lead', { storage: first.storage });
+    reopened.setModalAnswer(Promise.resolve({ confirm: false }));
     await reopened.page.load();
     reopened.page.input(input('title', 'New editor lead'));
+    assert.equal(reopened.modals.length, 0, 'A pending creation must recover automatically without an abandonment prompt.');
+    assert.equal(reopened.page.data.pendingCreationUnconfirmed, true);
+    assert.equal(reopened.page.data.lead.title, 'Original lead', 'Pending creation content must remain locked.');
+    const original = reopened.formDrafts.loadDraft('submission-lead', 'user-1', 'new');
+    assert.equal(reopened.formDrafts.saveDraft('submission-lead', 'user-1', 'new', original.baseVersion, {
+      ...original.value, lead: { ...original.value.lead, title: 'New editor lead' },
+    }), true);
+    assert.notEqual(reopened.formDrafts.loadDraft('submission-lead', 'user-1', 'new').revision, original.revision);
     const saved = structuredClone([...first.storage.values()][0]);
     if (outcome === 'success') pending.resolve({ id: 'lead-1' });
     else pending.reject({ code: 'VERSION_CONFLICT', message: 'The lead was updated' });
     await saving;
     assert.deepEqual([...first.storage.values()][0], saved);
     assert.deepEqual(first.effects, effects);
-    assert.equal(reopened.page.data.lead.title, 'New editor lead');
+    assert.equal(reopened.page.data.lead.title, 'Original lead');
+    assert.equal(reopened.formDrafts.loadDraft('submission-lead', 'user-1', 'new').value.lead.title, 'New editor lead');
     assert.equal(reopened.page.data.conflict, false);
   });
 }

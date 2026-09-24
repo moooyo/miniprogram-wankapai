@@ -8,7 +8,9 @@
     "test": "tsx --test tests/*.test.ts",
     "build": "node scripts/build.mjs",
     "pretest:ui": "npm run build",
-    "test:ui": "node scripts/ui-acceptance.mjs"
+    "test:ui": "node scripts/ui-acceptance.mjs",
+    "prototype": "node scripts/prototype-build.mjs",
+    "test:prototype": "node scripts/acceptance-prototype.mjs"
   },
   "engines": {
     "node": ">=20"

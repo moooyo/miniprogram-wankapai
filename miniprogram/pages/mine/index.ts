@@ -2,33 +2,54 @@ import { api, ensureSession, setDemoRole } from '../../services/api';
 import type { Session } from '../../../shared/contracts';
 
 Page({
+  disposed: false,
   data: {
     loading: true,
     error: '',
+    countsLoading: false,
+    countsReady: false,
+    countsError: '',
     session: null as Session | null,
     pendingCount: 0,
     returnedCount: 0,
     changingRole: false,
   },
+  loadVersion: 0,
   onShow() { void this.load(); },
+  onUnload() { this.disposed = true; this.loadVersion++; },
   async load() {
-    this.setData({ loading: true, error: '' });
+    if (this.disposed) return;
+    const version = ++this.loadVersion;
+    this.setData({ loading: true, error: '', session: null, countsLoading: false, countsReady: false, countsError: '', pendingCount: 0, returnedCount: 0 });
     try {
       const session = await ensureSession();
-      const submissions = await api.query('submissions.list', { limit: 50 });
+      if (version !== this.loadVersion) return;
+      this.setData({ session, loading: false, countsLoading: true });
+    } catch {
+      if (version === this.loadVersion) this.setData({ loading: false, session: null, error: '账号信息暂时无法确认，请重试。常用功能仍可从下方进入。' });
+      return;
+    }
+    try {
+      const [pending, returned] = await Promise.all([
+        api.query('submissions.list', { status: 'pending', limit: 1 }),
+        api.query('submissions.list', { status: 'returned', limit: 1 }),
+      ]);
+      if (version !== this.loadVersion) return;
       this.setData({
-        session,
-        pendingCount: submissions.items.filter(item => item.status === 'pending').length,
-        returnedCount: submissions.items.filter(item => item.status === 'returned').length,
+        countsReady: true,
+        pendingCount: pending.items.length,
+        returnedCount: returned.items.length,
       });
-    } catch (error) {
-      this.setData({ error: error instanceof Error ? error.message : '暂时无法读取，请重试。' });
-    } finally { this.setData({ loading: false }); }
+    } catch {
+      if (version === this.loadVersion) this.setData({ countsReady: false, pendingCount: 0, returnedCount: 0, countsError: '投稿状态暂时无法读取，请重试。你仍可进入“我的投稿”查看审核结果。' });
+    } finally { if (version === this.loadVersion) this.setData({ countsLoading: false }); }
   },
   openSubmissions() { wx.navigateTo({ url: '/pages/submissions/index' }); },
   openHistory() { wx.navigateTo({ url: '/pages/history/index' }); },
   openSubmission() { wx.navigateTo({ url: '/pages/submission-lead/index' }); },
   openPreferences() { wx.navigateTo({ url: '/pages/preferences/index' }); },
+  openEntitlements() { wx.navigateTo({ url: '/pages/entitlements/index' }); },
+  openLounges() { wx.navigateTo({ url: '/pages/lounges/index' }); },
   openReview() {
     if (this.data.session?.isModerator) wx.navigateTo({ url: '/pages/review/index' });
   },
@@ -42,12 +63,14 @@ Page({
   },
   async changeDemoRole(event: { detail: { value: string } }) {
     if (!this.data.session?.demo || this.data.changingRole) return;
+    const version = this.loadVersion;
     this.setData({ changingRole: true });
     try {
       await setDemoRole(Number(event.detail.value) === 1 ? 'moderator' : 'user');
+      if (version !== this.loadVersion) return;
       await this.load();
     } catch (error) {
-      this.setData({ error: error instanceof Error ? error.message : '角色切换失败，请重试。' });
-    } finally { this.setData({ changingRole: false }); }
+      if (!this.disposed && version === this.loadVersion) this.setData({ error: error instanceof Error ? error.message : '角色切换失败，请重试。' });
+    } finally { if (!this.disposed) this.setData({ changingRole: false }); }
   },
 });

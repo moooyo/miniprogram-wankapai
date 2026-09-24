@@ -1,5 +1,6 @@
 <view class="page todo-page" aria-hidden="{{showActions}}">
   <view class="page-heading row-between"><view><text class="eyebrow">{{dateLabel}}</text><view class="heading">我的待办</view></view><button class="text-button" bindtap="browse">找活动</button></view>
+  <view wx:if="{{refreshing || refreshError}}" class="refresh-notice" role="status"><text>{{refreshing ? mutationNotice + '正在更新待办，已读记录和分组仍然保留…' : refreshError}}</text><button wx:if="{{refreshError}}" class="text-button" bindtap="load">重新刷新</button></view>
   <view class="follow-ups" wx:if="{{pendingCount || billCount}}">
     <button class="follow-up" wx:if="{{pendingCount}}" bindtap="openRewards"><view class="follow-up-copy"><text class="text-muted">待确认</text><text class="follow-up-scope">全部币种</text></view><text class="follow-up-value">{{pendingCount}} 笔</text><text class="arrow">›</text></button>
     <button class="follow-up" wx:if="{{billCount}}" bindtap="openWallet"><text class="text-muted">最近还款</text><text class="follow-up-value">{{nearestBill}}</text><text class="arrow">›</text></button>
@@ -19,12 +20,13 @@
     <view class="task-row" data-id="{{item.id}}" data-group="{{item.groupKey}}">
       <view class="date-column {{item.late ? 'overdue' : ''}}" aria-label="{{item.deadline}}截止"><text class="date-day">{{item.dateDay}}</text><text class="date-month">{{item.dateMonth}}</text></view>
       <view class="task-body">
-        <button class="task-open" data-id="{{item.id}}" bindtap="openTask"><view class="bank-line"><image wx:if="{{item.logo}}" class="bank-logo" src="{{item.logo}}" mode="aspectFit" /><text>{{item.bank}}</text><text class="task-status">{{item.status}}</text></view><view class="task-title">{{item.title}}</view></button>
+        <button class="task-open" data-id="{{item.id}}" bindtap="openTask" disabled="{{loading || refreshing || outdated || !!busyId}}"><view class="bank-line"><image wx:if="{{item.logo}}" class="bank-logo" src="{{item.logo}}" mode="aspectFit" /><text>{{item.bank}}</text><text class="task-status">{{item.status}}</text></view><view class="task-title">{{item.title}}</view></button>
+        <text wx:if="{{item.showPeriod}}" class="task-period">参与期 · {{item.period}}</text>
         <text wx:if="{{item.cardName}}" class="task-card">{{item.cardName}}</text>
         <view class="task-meta"><text>{{item.resultNote || item.progress}}</text><view class="reward"><text>{{item.rewardLabel}} {{item.reward}}</text><text wx:if="{{item.estimate}}" class="original-estimate">原预计 {{item.estimate}}</text></view></view>
         <view class="task-actions">
-          <button class="small-primary task-primary" data-id="{{item.id}}" data-action="{{item.primaryAction}}" loading="{{busyId === item.id}}" disabled="{{!!busyId}}" bindtap="runPrimaryAction">{{item.primaryLabel}}</button>
-          <button class="more-button" data-id="{{item.id}}" bindtap="showMore" disabled="{{!!busyId}}" aria-label="{{item.title}}的更多操作">更多</button>
+          <button class="small-primary task-primary" data-id="{{item.id}}" data-action="{{item.primaryAction}}" loading="{{busyId === item.id}}" disabled="{{loading || refreshing || outdated || !!busyId}}" bindtap="runPrimaryAction">{{item.primaryLabel}}</button>
+          <button class="more-button" data-id="{{item.id}}" bindtap="showMore" disabled="{{loading || refreshing || outdated || !!busyId}}" aria-label="{{item.period}} · {{item.title}}的更多操作">更多</button>
         </view>
       </view>
     </view>
@@ -33,15 +35,16 @@
   <view class="empty" wx:else><view class="empty-title">{{filter === 'unfinished' && closingOnly ? '本月底前没有遗漏的活动' : filter === 'completed' ? '本期还没有完成的活动' : filter === 'all' ? '当前没有活动记录' : '当前没有未完成活动'}}</view><text class="text-muted">{{filter === 'completed' ? '更早的完成结果与已跳过活动，可在全部参与记录中查看。' : '每期单独记录，完成后也能在全部参与记录中回看。'}}</text><button class="secondary" bindtap="browse">浏览活动</button></view>
   <button class="history-entry" bindtap="openHistory"><text>全部参与记录</text><text>含往期、已记录与已跳过 <text aria-hidden="true">›</text></text></button>
 </view>
-<app-sheet id="todo-actions" show="{{showActions}}" title="{{actionTitle}}" bindclose="closeActions">
+<app-sheet id="todo-actions" show="{{showActions}}" title="{{actionTitle}}" content-state="{{[actionId, actionTitle, actionPeriod, actionDeadline, actionCardName, actionCanProgress, actionCanComplete, actionStage, actionReceiptLabel]}}" bindclose="closeActions">
   <view class="sheet-actions">
+    <view class="action-context"><text class="action-period">参与期 · {{actionPeriod}}</text><text class="action-deadline">截止 {{actionDeadline}}</text></view>
     <text wx:if="{{actionCardName}}" class="action-card">{{actionCardName}}</text>
     <text class="action-note">这里只更新你的记录；银行报名和实际消费需在银行端完成。</text>
-    <button wx:if="{{actionCanProgress}}" class="task-more-progress" bindtap="editProgress" disabled="{{!!busyId}}">更新进度</button>
-    <button wx:if="{{actionCanComplete}}" class="task-more-complete" bindtap="complete" disabled="{{!!busyId}}">直接标记完成</button>
-    <button wx:if="{{actionStage !== 'received' && actionStage !== 'skipped'}}" class="task-more-receipt" bindtap="receipt" disabled="{{!!busyId}}">{{actionReceiptLabel}}</button>
-    <button wx:if="{{actionStage === 'completed'}}" bindtap="undoComplete">撤销完成</button>
-    <button wx:if="{{actionStage !== 'completed' && actionStage !== 'received'}}" bindtap="toggleSkip">{{actionStage === 'skipped' ? '恢复本期参与' : '本期不参加'}}</button>
-    <button data-id="{{actionId}}" bindtap="openTask">查看记录与活动入口</button>
+    <button wx:if="{{actionCanProgress}}" class="task-more-progress" bindtap="editProgress" disabled="{{loading || refreshing || outdated || !!busyId}}">更新进度</button>
+    <button wx:if="{{actionCanComplete}}" class="task-more-complete" bindtap="complete" disabled="{{loading || refreshing || outdated || !!busyId}}">直接标记完成</button>
+    <button wx:if="{{actionStage !== 'received' && actionStage !== 'skipped'}}" class="task-more-receipt" bindtap="receipt" disabled="{{loading || refreshing || outdated || !!busyId}}">{{actionReceiptLabel}}</button>
+    <button wx:if="{{actionStage === 'completed'}}" bindtap="undoComplete" disabled="{{loading || refreshing || outdated || !!busyId}}">撤销完成</button>
+    <button wx:if="{{actionStage !== 'completed' && actionStage !== 'received'}}" bindtap="toggleSkip" disabled="{{loading || refreshing || outdated || !!busyId}}">{{actionStage === 'skipped' ? '恢复本期参与' : '本期不参加'}}</button>
+    <button data-id="{{actionId}}" bindtap="openTask" disabled="{{loading || refreshing || outdated || !!busyId}}">查看记录与活动入口</button>
   </view>
 </app-sheet>

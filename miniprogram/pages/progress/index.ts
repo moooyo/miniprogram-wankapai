@@ -4,6 +4,7 @@ import { cardLabel } from '../../services/card-labels';
 import { confirmDraftRecovery, getDraftRevision, loadDraft, removeDraft, saveDraft } from '../../services/form-draft';
 import { periodLabel, showError, stageLabel } from '../../services/format';
 import { benefitCopy } from '../../services/benefit-copy';
+import { backToActivity } from '../../services/navigation';
 
 type InputEvent = { detail: { value: string } };
 type CheckEvent = { detail: { value: string[] } };
@@ -62,9 +63,9 @@ Page({
       participation, title: activity.title, periodText: periodLabel(participation.periodKey),
       benefit: benefitCopy(activity.rewardKind), recordStatus: stageLabel(participation),
       cardName, target: activity.target, unit: activity.unit,
-      showRegistration: activity.requiresRegistration || Boolean(participation.registeredAt),
+      showRegistration: activity.requiresRegistration || Boolean(participation.registeredAt) || (preserveInput && (this.data.showRegistration || this.data.registered)),
       editable: !['completed', 'received', 'skipped'].includes(participation.stage),
-      latestSummary: `最新记录：${participation.progress} ${activity.unit} · ${stageLabel(participation)}`,
+      latestSummary: `最新记录：${participation.progress} ${activity.unit} · ${stageLabel(participation)} · ${participation.registeredAt ? '已报名' : '未报名'}`,
       ...(preserveInput ? {} : {
         progressInput: String(participation.progress), registered: Boolean(participation.registeredAt),
       }),
@@ -83,6 +84,7 @@ Page({
           if (this.disposed) return;
           if (recover) {
             this.setData({ progressInput: saved.value.progressInput, registered: saved.value.registered,
+              showRegistration: this.data.showRegistration || saved.value.registered,
               dirty: true, reapplyRequired: true, draftNotice: '已恢复本机草稿，请核对最新记录后保存。' });
             this.persistDraft();
           } else removeDraft('progress', this.data.ownerId, this.data.participationId);
@@ -149,7 +151,7 @@ Page({
       this.setData({ dirty: false, draftNotice: '' });
       wx.disableAlertBeforeUnload();
       wx.showToast({ title: '进度已保存', icon: 'success' });
-      wx.navigateBack();
+      backToActivity(this.data.activityId, this.data.participationId);
     } catch (error) {
       if (this.disposed) return;
       if (codeOf(error) === 'VERSION_CONFLICT') {
@@ -164,5 +166,5 @@ Page({
       }
     } finally { if (!this.disposed) this.setData({ busy: false }); }
   },
-  back() { if (!this.data.busy && !this.data.reloading) wx.navigateBack(); },
+  back() { if (!this.data.busy && !this.data.reloading) backToActivity(this.data.activityId, this.data.participationId); },
 });

@@ -1,1 +1,7 @@
-.page { padding:24px; }
+.web-entry-page { max-width:720px; margin:0 auto; padding:24px 20px calc(32px + env(safe-area-inset-bottom)); }
+.entry-state { padding:24px 20px; border-radius:12px; background:var(--surface,#fff); }
+.entry-title { display:block; font-size:22px; font-weight:600; line-height:1.4; }
+.entry-copy { display:block; margin:12px 0 20px; color:var(--muted,#626f82); font-size:15px; line-height:1.7; }
+.entry-url { display:block; padding:12px; margin-bottom:20px; background:var(--page,#f4f7fb); border-radius:8px; color:var(--ink,#172230); font-size:14px; line-height:1.7; word-break:break-all; }
+.entry-state button { width:100%; min-height:48px; margin-top:12px; }
+.back-button { background:transparent; color:var(--brand,#1f61d8); }

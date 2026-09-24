@@ -3,12 +3,14 @@
   <view wx:if="{{denied}}" class="empty"><text class="empty-title">此账号没有审核权限</text><text class="page-description">运营权限由账号授权决定。</text><button class="text-button" bindtap="goBack">返回</button></view>
   <block wx:else>
     <view class="tabs"><button class="tab {{status === 'pending' ? 'active' : ''}}" data-status="pending" bindtap="changeStatus" aria-pressed="{{status === 'pending'}}">待审核</button><button class="tab {{status === 'returned' ? 'active' : ''}}" data-status="returned" bindtap="changeStatus" aria-pressed="{{status === 'returned'}}">已退回</button><button class="tab {{status === 'published' ? 'active' : ''}}" data-status="published" bindtap="changeStatus" aria-pressed="{{status === 'published'}}">已发布</button></view>
-    <view wx:if="{{error}}" class="error"><text>{{error}}</text><button class="text-button" bindtap="load">重试</button></view>
-    <view wx:if="{{loading}}" class="loading">正在读取投稿…</view>
-    <view wx:elif="{{!items.length}}" class="empty"><text class="empty-title">{{status === 'pending' ? '没有待审核投稿' : status === 'returned' ? '没有退回的投稿' : '还没有已发布投稿'}}</text><text class="page-description">{{status === 'pending' ? '新的活动线索会出现在这里。' : '处理结果会保留在这里，便于核查。'}}</text></view>
-    <view wx:else class="review-list">
-      <button wx:for="{{items}}" wx:key="id" class="review-row" bindtap="open" data-id="{{item.id}}"><view class="row-top"><text>{{item.bankName}}</text><text>{{item.dateLabel}}</text></view><text class="submission-title">{{item.titleText}}</text><text wx:if="{{item.isLead}}" class="conditions">活动线索 · 待补齐完整规则</text><text class="conditions">{{item.summaryText}}</text><text wx:if="{{status === 'returned'}}" class="review-note">{{item.reviewNote}}</text><view class="row-bottom"><text>{{status === 'pending' ? '核实与审核' : '查看处理结果'}}</text><text class="chevron" aria-hidden="true">›</text></view></button>
+    <view wx:if="{{error}}" class="error" role="alert"><text>{{error}}</text><text wx:if="{{items.length}}" class="refresh-copy">{{sessionVerified ? '当前显示上次读取的投稿。' : '已保留列表位置。审核权限暂未核实，重新核实后显示投稿。'}}</text><button class="text-button" bindtap="load" disabled="{{loading}}">{{sessionVerified ? '重新读取投稿' : '重新核实权限'}}</button></view>
+    <text wx:if="{{loading && items.length}}" class="refresh-notice" role="status">{{sessionVerified ? '正在更新审核列表，已显示的内容仍保留…' : '正在核实审核权限，核实通过后显示投稿…'}}</text>
+    <view wx:if="{{loading && !items.length}}" class="loading">{{sessionVerified ? '正在读取投稿…' : '正在核实审核权限…'}}</view>
+    <view wx:elif="{{!items.length && !error}}" class="empty"><text class="empty-title">{{status === 'pending' ? '没有待审核投稿' : status === 'returned' ? '没有退回的投稿' : '还没有已发布投稿'}}</text><text class="page-description">{{status === 'pending' ? '新的活动线索会出现在这里。' : '处理结果会保留在这里，便于核查。'}}</text></view>
+    <view wx:else class="review-list {{!sessionVerified ? 'is-session-pending' : ''}}" aria-hidden="{{!sessionVerified}}">
+      <button wx:for="{{items}}" wx:key="id" class="review-row" bindtap="open" data-id="{{item.id}}" disabled="{{!sessionVerified}}"><view class="row-top"><text>{{item.bankName}}</text><text>{{item.dateLabel}}</text></view><text class="submission-title">{{item.titleText}}</text><text wx:if="{{item.isLead}}" class="conditions">活动线索 · 待补齐完整规则</text><text class="conditions">{{item.summaryText}}</text><text wx:if="{{status === 'returned'}}" class="review-note">{{item.reviewNote}}</text><view class="row-bottom"><text>{{status === 'pending' ? '核实与审核' : '查看处理结果'}}</text><text class="chevron" aria-hidden="true">›</text></view></button>
     </view>
-    <button wx:if="{{nextCursor}}" class="text-button" bindtap="loadMore" loading="{{loadingMore}}" disabled="{{loadingMore}}">加载更多</button>
+    <view wx:if="{{loadMoreError && !loading}}" class="error more-error" role="alert"><text>{{loadMoreError}}</text><text class="page-description">已读取的投稿仍保留在上方。</text></view>
+    <button wx:if="{{nextCursor && !loading}}" class="text-button" bindtap="loadMore" loading="{{loadingMore}}" disabled="{{loadingMore || !sessionVerified || refreshing}}">{{loadingMore ? '正在读取更多投稿' : loadMoreError ? '重试加载更多' : '加载更多'}}</button>
   </block>
 </view>

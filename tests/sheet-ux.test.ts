@@ -53,6 +53,7 @@ async function setup() {
   }
   return { calls, create, show, windowHandlers, keyboardHandlers,
     setRoute(value: string) { route = value; },
+    setHeight(value: number) { height = value; },
     resize(value: number) { height = value; windowHandlers.forEach(callback => callback()); },
     hide(instance: any) { definition.pageLifetimes.hide.call(instance); },
     showPage(instance: any) { definition.pageLifetimes.show.call(instance); },
@@ -75,7 +76,7 @@ test('modal sheets hide native tab navigation until the last sheet is closed', a
   } finally { env.detach(first); env.detach(second); }
 });
 
-test('leaving a sheet page restores navigation and removes resize subscriptions', async () => {
+test('hiding a sheet page releases navigation without requesting discard and keeps the sheet for return', async () => {
   const env = await setup();
   const sheet = env.create();
   env.show(sheet, true);
@@ -83,9 +84,36 @@ test('leaving a sheet page restores navigation and removes resize subscriptions'
   env.resize(420);
   assert.ok(sheet.data.bodyHeight < before);
   env.hide(sheet);
-  assert.equal(sheet.closed, 1);
+  assert.equal(sheet.closed, 0);
+  assert.equal(sheet.data.show, true);
   assert.deepEqual(env.calls, ['hide', 'show']);
+  env.showPage(sheet);
+  assert.equal(sheet.closed, 0);
+  assert.equal(sheet.data.show, true);
+  assert.deepEqual(env.calls, ['hide', 'show', 'hide']);
   env.detach(sheet);
+  assert.deepEqual(env.calls, ['hide', 'show', 'hide', 'show']);
+  assert.equal(env.windowHandlers.size, 0);
+  assert.equal(env.keyboardHandlers.size, 0);
+});
+
+test('a dirty sheet owner receives no close request while hidden and is measured when it returns', async () => {
+  const env = await setup();
+  const sheet = env.create();
+  let discardPrompts = 0;
+  sheet.triggerEvent = (name: string) => { if (name === 'close') discardPrompts += 1; };
+  env.show(sheet, true);
+  const priorHeight = sheet.data.bodyHeight;
+  env.hide(sheet);
+  env.setHeight(420);
+  assert.equal(sheet.data.bodyHeight, priorHeight);
+  env.showPage(sheet);
+  assert.equal(discardPrompts, 0);
+  assert.equal(sheet.data.show, true);
+  assert.ok(sheet.data.bodyHeight < priorHeight);
+  assert.deepEqual(env.calls, ['hide', 'show', 'hide']);
+  env.detach(sheet);
+  assert.equal(discardPrompts, 0);
   assert.equal(env.windowHandlers.size, 0);
   assert.equal(env.keyboardHandlers.size, 0);
 });

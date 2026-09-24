@@ -1,50 +1,63 @@
 .wallet-page { background:#fff; min-height:100vh; padding-bottom:40rpx; }
 .page-heading { gap:20rpx; padding:12rpx 0 32rpx; }
-.heading { color:#14243a; font-size:48rpx; font-weight:650; }
-.wallet-count { display:block; font-size:26rpx; margin-top:10rpx; }
-.text-button { color:#1764d9; background:transparent; min-height:48px; line-height:48px; padding:0 12rpx; margin:0; font-size:26rpx; flex-shrink:0; }
+.heading { color:#14243a; font-size:24px; font-weight:650; }
+.wallet-count { display:block; font-size:14px; margin-top:10rpx; }
+.text-button { color:#1764d9; background:transparent; min-height:48px; line-height:48px; padding:0 12rpx; margin:0; font-size:14px; flex-shrink:0; }
 .text-button::after,.account-settings::after,.reminder-button::after,.browse-mine::after { border:0; }
-.section-heading { font-size:28rpx; color:#647084; padding:20rpx 0; }
+.section-heading { font-size:14px; color:#647084; padding:20rpx 0; }
 .naming-notice { background:#f2f6fc; border-radius:12rpx; padding:24rpx; margin-bottom:16rpx; }
-.naming-title { color:#243b58; font-size:30rpx; font-weight:600; line-height:1.5; }
-.naming-help { display:block; color:#647084; font-size:24rpx; line-height:1.65; margin-top:8rpx; }
+.naming-title { color:#243b58; font-size:15px; font-weight:600; line-height:1.5; }
+.naming-help { display:block; color:#647084; font-size:14px; line-height:1.65; margin-top:8rpx; }
 .naming-row { display:flex; align-items:center; justify-content:space-between; gap:16rpx; margin-top:16rpx; }
 .naming-card { flex:1; min-width:0; overflow-wrap:anywhere; }
 .account-group { border-top:1rpx solid #e5eaf1; padding:20rpx 0 24rpx; }
-.archived-label { color:#647084; font-size:23rpx; margin-bottom:16rpx; }
+.archived-label { color:#647084; font-size:14px; margin-bottom:16rpx; }
 .account-head { display:flex; gap:20rpx; align-items:center; }
-button.account-settings { display:flex; align-items:center; gap:8rpx; flex-shrink:0; min-height:48px; padding:0 4rpx; margin:0; background:transparent; color:#526579; font-size:24rpx; line-height:1.5; }
+button.account-settings { display:flex; align-items:center; gap:8rpx; flex-shrink:0; min-height:48px; padding:0 4rpx; margin:0; background:transparent; color:#526579; font-size:14px; line-height:1.5; }
 .bank-logo { width:56rpx; height:56rpx; flex-shrink:0; }
 .account-info { flex:1; min-width:0; }
-.account-title { font-size:32rpx; line-height:1.5; color:#14243a; font-weight:600; }
-.account-subtitle { display:block; font-size:25rpx; line-height:1.55; color:#647084; margin-top:4rpx; }
+.account-title { font-size:16px; line-height:1.5; color:#14243a; font-weight:600; }
+.account-identity { display:block; margin-top:4rpx; color:#243b58; font-size:15px; font-weight:600; line-height:1.55; overflow-wrap:anywhere; }
+.account-subtitle { display:block; font-size:14px; line-height:1.55; color:#647084; margin-top:4rpx; }
 .bill-main { padding-top:20rpx; }
 .bill-date-row { gap:16rpx; }
-.due-date { font-size:40rpx; color:#14243a; font-weight:600; font-variant-numeric:tabular-nums; }
+.due-date { font-size:20px; color:#14243a; font-weight:600; font-variant-numeric:tabular-nums; }
 .late { color:#a8442c; }
-.bill-status { font-size:24rpx; line-height:1.5; color:#647084; display:block; margin-top:6rpx; }
-.small-primary,.small-secondary { min-height:48px; line-height:48px; padding:0 24rpx; margin:0; border-radius:12rpx; font-size:26rpx; flex-shrink:0; }
+.bill-status { font-size:14px; line-height:1.5; color:#647084; display:block; margin-top:6rpx; }
+.small-primary,.small-secondary { min-height:48px; line-height:48px; padding:0 24rpx; margin:0; border-radius:12rpx; font-size:14px; flex-shrink:0; }
 .small-primary { color:#1764d9; background:#edf4ff; }
 .small-primary::after { border:0; }
 .small-secondary { color:#526579; background:#fff; }
 .small-secondary::after { border-color:#c8d2df; border-radius:24rpx; }
-.bill-meta-row { color:#647084; font-size:23rpx; margin-top:6rpx; gap:12rpx; }
-button.reminder-button { min-height:48px; margin:0; padding:0; display:flex; justify-content:flex-start; background:transparent; color:#1764d9; font-size:24rpx; line-height:1.5; }
-.reminder-notice { display:block; margin:0 0 12rpx; color:#326548; font-size:24rpx; line-height:1.6; }
-.date-edit { color:#1764d9; font-size:24rpx; min-height:48px; display:flex; align-items:center; }
-.schedule { font-size:24rpx; color:#647084; line-height:1.6; }
-.missing-bill { margin:16rpx 0; font-size:25rpx; color:#647084; line-height:1.6; }
+.bill-meta-row { color:#647084; font-size:14px; margin-top:6rpx; gap:12rpx; }
+button.reminder-button { min-height:48px; margin:0; padding:0; display:flex; justify-content:flex-start; background:transparent; color:#1764d9; font-size:14px; line-height:1.5; }
+.reminder-notice { display:block; margin:0 0 12rpx; color:#326548; font-size:14px; line-height:1.6; }
+.date-edit { color:#1764d9; font-size:14px; min-height:48px; display:flex; align-items:center; }
+.schedule { font-size:14px; color:#647084; line-height:1.6; }
+.missing-bill { margin:16rpx 0; font-size:14px; color:#647084; line-height:1.6; }
 .account-extra { margin-top:16rpx; padding:16rpx 0 0 24rpx; border-top:1rpx solid #e5eaf1; border-left:3rpx solid #dce7f6; }
 button.account-edit,button.reminder-settings { justify-content:flex-start; padding-left:0; text-align:left; }
 .member-row { display:flex; gap:16rpx; align-items:center; justify-content:space-between; border-bottom:1rpx solid #edf0f5; padding:10rpx 0; }
-.member-title { font-size:28rpx; line-height:1.5; color:#243b58; }
-.member-description { font-size:24rpx; color:#647084; line-height:1.6; }
+.member-title { font-size:14px; line-height:1.5; color:#243b58; }
+.member-description { font-size:14px; color:#647084; line-height:1.6; }
 .older-bill { padding-top:20rpx; }
 .loose-heading { border-top:1rpx solid #e5eaf1; margin-top:16rpx; }
 .loose-card { display:flex; gap:20rpx; align-items:center; padding:24rpx 0; border-bottom:1rpx solid #e5eaf1; }
-button.browse-mine { display:flex; align-items:center; justify-content:space-between; color:#1764d9; font-size:28rpx; min-height:104rpx; padding:0; margin:20rpx 0 0; background:#fff; text-align:left; line-height:1.5; }
-.browse-mine text { font-size:36rpx; }
-.privacy-note { color:#647084; font-size:24rpx; line-height:1.7; margin-top:20rpx; }
-.loading,.empty { padding:64rpx 12rpx; text-align:center; font-size:28rpx; line-height:1.65; }
-.empty-title { color:#14243a; font-size:32rpx; font-weight:600; margin-bottom:12rpx; }
+button.browse-mine { display:flex; align-items:center; justify-content:space-between; color:#1764d9; font-size:14px; min-height:104rpx; padding:0; margin:20rpx 0 0; background:#fff; text-align:left; line-height:1.5; }
+.browse-mine text { font-size:18px; }
+.privacy-note { color:#647084; font-size:14px; line-height:1.7; margin-top:20rpx; }
+.loading,.empty { padding:64rpx 12rpx; text-align:center; font-size:14px; line-height:1.65; }
+.empty-title { color:#14243a; font-size:16px; font-weight:600; margin-bottom:12rpx; }
 .empty button { margin-top:28rpx; }
+.refresh-notice { padding:12px; margin-bottom:12px; color:var(--muted); background:var(--tint); border-radius:8px; font-size:14px; line-height:1.6; }
+.bill-date-row,.bill-meta-row { flex-wrap:wrap; }
+.bill-date-row > view,.member-row > view { min-width:0; flex:1; overflow-wrap:anywhere; }
+.account-head,.loose-card { flex-wrap:wrap; }
+.account-info { min-width:120px; overflow-wrap:anywhere; }
+.account-settings { max-width:100%; }
+.text-button,.small-primary,.small-secondary { line-height:1.5; padding-top:10px; padding-bottom:10px; }
+.benefits-entry { margin-bottom:24px; border:1px solid var(--line); border-radius:12px; background:var(--tint); overflow:hidden; }
+button.benefits-primary { display:flex; flex-direction:column; align-items:flex-start; width:100%; padding:16px; background:transparent; text-align:left; gap:5px; }
+.benefits-title { font-size:18px; font-weight:600; color:var(--ink); }
+.benefits-caption { font-size:14px; color:var(--muted); font-weight:400; line-height:1.6; }
+button.benefits-airports { width:100%; min-height:48px; justify-content:space-between; padding:12px 16px; border-top:1px solid var(--line); border-radius:0; background:transparent; color:var(--brand); font-size:15px; }

@@ -3,6 +3,7 @@
   <view wx:elif="{{loadError}}" class="entry-state">
     <view class="entry-error">{{loadError}}</view>
     <button class="entry-secondary" bindtap="load">重新加载</button>
+    <button class="entry-secondary" bindtap="back">返回活动</button>
   </view>
   <block wx:else>
     <view class="entry-context">
@@ -10,39 +11,58 @@
       <view class="entry-title">{{title}}</view>
       <view wx:if="{{cardName}}" class="entry-card">关联卡片 · {{cardName}}</view>
     </view>
-    <view wx:if="{{!allowed}}" class="entry-notice">本期尚未开始或已标记不参与，请返回活动详情确认记录。</view>
-    <view wx:if="{{conflict || reapplyRequired}}" id="record-conflict" class="entry-notice">
-      <view>{{conflict ? '记录已更新，你的金额和日期仍然保留。' : latestSummary}}</view>
+    <view wx:if="{{unassignedDraft}}" class="entry-notice">
+      <view>本机还有一份未标明活动归属期的旧草稿，已保留，未应用到当前记录。</view>
+      <button wx:if="{{!unassignedDraftVisible}}" class="entry-secondary" bindtap="showUnassignedDraft" disabled="{{busy || reloading}}">查看未归属旧草稿</button>
+      <block wx:else><view>旧草稿金额填写：{{unassignedDraft.amountInput}}；实际日期：{{unassignedDraft.receivedOn}}。</view><view>当前页面是{{currentPeriodText}}的已有记录。请先核对活动与卡片，确认后可在下方手动填写并保存更正；旧草稿仍会保留。</view></block>
+    </view>
+    <view wx:if="{{pendingCreation}}" class="entry-notice" role="status">
+      <view>上次保存结果尚未确认 · {{periodText}}</view>
+      <view>原金额和日期已锁定。{{pendingReplayOnly ? '核对只查询原请求结果，不会写入新一期。暂未查到结果时请保留草稿，稍后再次核对。' : '重试会继续核对同一次保存，不会重复新增。'}}</view>
+    </view>
+    <view wx:elif="{{targetReviewRequired}}" class="entry-notice" role="status">
+      <view>请确认草稿的活动归属期</view>
+      <view>金额和实际日期已保留。实际到账月份不能用来判断活动归属期。当前可应用到：{{currentPeriodText}}{{currentTarget.participationId ? '的已有记录' : '的新记录'}}。</view>
+      <button class="entry-secondary" bindtap="confirmDraftTarget" disabled="{{busy || reloading || dateRefreshing || !currentTarget}}">确认应用到{{currentPeriodText}}</button>
+    </view>
+    <view wx:if="{{!allowed && !pendingCreation}}" class="entry-notice">本期尚未开始或已标记不参与，请返回活动详情确认记录。</view>
+    <view wx:if="{{!pendingCreation && (conflict || reapplyRequired)}}" id="record-conflict" class="entry-notice">
+      <view>{{conflict ? (targetReviewRequired ? '活动归属期待核对，你的金额和日期仍然保留。' : '记录已更新，你的金额和日期仍然保留。') : latestSummary}}</view>
       <view wx:if="{{reapplyRequired}}">下方是你的填写内容，请核对后重新应用。</view>
-      <button wx:if="{{conflict}}" class="entry-secondary" bindtap="reloadLatest" loading="{{reloading}}" disabled="{{reloading}}">读取最新记录</button>
+      <button wx:if="{{conflict}}" class="entry-secondary" bindtap="reloadLatest" loading="{{reloading}}" disabled="{{reloading || dateRefreshing}}">读取最新记录</button>
     </view>
     <view class="entry-field" id="amount-field">
       <label class="entry-label" for="amount">{{benefit.amountLabel}}</label>
       <view class="entry-input-line {{amountError ? 'entry-input-invalid' : ''}}">
         <text class="entry-currency">{{currency}}</text>
-        <input id="amount" class="entry-amount" type="digit" value="{{amountInput}}" bindinput="onAmountInput" disabled="{{busy || reloading || !allowed}}" maxlength="18" placeholder="0.00" aria-label="{{benefit.amountLabel}}，{{currency}}" adjust-position="{{true}}" focus="{{focusField === 'amount'}}" />
+        <input id="amount" class="entry-amount" type="digit" value="{{amountInput}}" bindinput="onAmountInput" disabled="{{busy || reloading || pendingCreation || targetReviewRequired || !allowed}}" maxlength="18" placeholder="0.00" aria-label="{{benefit.amountLabel}}，{{currency}}" adjust-position="{{true}}" focus="{{focusField === 'amount'}}" />
       </view>
       <view wx:if="{{amountError}}" class="entry-error" role="alert">{{amountError}}</view>
       <view class="entry-hint">{{benefit.expectedLabel}} {{expectedText}}，{{benefit.isDiscount ? '请按实际抵扣的金额记录。' : '请按实际收到的金额记录。'}}</view>
     </view>
     <view class="entry-field entry-date-field" id="receipt-date-field">
       <view class="entry-label">{{benefit.dateLabel}}</view>
-      <picker mode="date" value="{{receivedOn}}" start="{{minDate}}" end="{{maxDate}}" bindchange="onDateChange" disabled="{{busy || reloading || !allowed}}" aria-label="选择{{benefit.dateLabel}}">
+      <view wx:if="{{dateRefreshing}}" class="entry-hint" role="status">正在核对可选日期，填写内容保持不变…</view>
+      <view wx:elif="{{dateRefreshError}}" class="entry-notice" role="alert">
+        <view>{{dateRefreshError}}</view>
+        <button class="entry-secondary" bindtap="refreshDateRange" disabled="{{busy || reloading}}">重新核对日期</button>
+      </view>
+      <picker mode="date" value="{{receivedOn}}" start="{{minDate}}" end="{{maxDate}}" bindchange="onDateChange" disabled="{{busy || reloading || dateRefreshing || dateRefreshError || pendingCreation || targetReviewRequired || !allowed}}" aria-label="选择{{benefit.dateLabel}}">
         <view class="entry-date {{dateError ? 'entry-input-invalid' : ''}}">
           <text>{{receivedOn}}</text>
           <text class="entry-date-edit">修改</text>
         </view>
       </picker>
       <view wx:if="{{dateError}}" class="entry-error" role="alert">{{dateError}}</view>
-      <view class="entry-hint">计入 {{monthText}}的{{benefit.isDiscount ? '已享优惠' : '返现到账'}}，活动归属期保持不变。</view>
+      <view class="entry-hint">计入 {{monthText}}的{{benefit.isDiscount ? '已享优惠' : '返现到账'}}。{{pendingCreation ? '原请求的活动归属期以核对结果为准。' : targetReviewRequired ? '活动归属期仍需单独确认。' : '活动归属期保持不变。'}}</view>
     </view>
-    <view class="entry-explanation" wx:if="{{isEditing}}">保存将更正这笔{{benefit.recordNoun}}，不会重复增加一笔。</view>
-    <view class="entry-explanation" wx:elif="{{willComplete}}">{{benefit.recordAction}}时，会同时标记本期活动已完成。</view>
+    <view class="entry-explanation" wx:if="{{!pendingCreation && !targetReviewRequired && isEditing}}">保存将更正这笔{{benefit.recordNoun}}，不会重复增加一笔。</view>
+    <view class="entry-explanation" wx:elif="{{!pendingCreation && !targetReviewRequired && willComplete}}">{{benefit.recordAction}}时，会同时标记本期活动已完成。</view>
     <view wx:if="{{formError}}" class="entry-form-error" role="alert">{{formError}}</view>
     <view wx:if="{{draftNotice}}" class="entry-hint">{{draftNotice}}</view>
     <view class="entry-actions">
       <button class="entry-secondary" bindtap="back" disabled="{{busy || reloading}}">返回</button>
-      <button class="entry-primary" bindtap="save" loading="{{busy}}" disabled="{{busy || reloading || conflict || !allowed}}">{{busy ? '正在保存' : reapplyRequired ? '重新应用并保存' : (isEditing ? '保存更正' : benefit.recordAction)}}</button>
+      <button class="entry-primary" bindtap="save" loading="{{busy || dateRefreshing}}" disabled="{{busy || reloading || dateRefreshing || (!pendingCreation && (conflict || targetReviewRequired || !allowed))}}">{{dateRefreshing ? '正在核对日期' : busy ? (pendingCreation && pendingReplayOnly ? '正在核对' : '正在保存') : pendingCreation ? (pendingReplayOnly ? '核对上次保存结果' : '重试上次保存') : reapplyRequired ? '重新应用并保存' : (isEditing ? '保存更正' : benefit.recordAction)}}</button>
     </view>
   </block>
 </view>

@@ -1,0 +1,40 @@
+<view class="page lounges-page">
+  <view class="page-heading"><view class="heading">机场贵宾厅</view><view class="subtitle">按机场查支持银行与准入条件</view></view>
+  <view wx:if="{{entitlementId}}" class="scope-notice"><view><text class="subtitle">查询范围</text><view>{{scopeTitle || '指定权益'}}</view></view><button class="text-button" bindtap="clearScope">查看全部</button></view>
+  <view class="search-panel">
+    <view class="field"><label class="field-label" for="airport-query">机场名称、城市或三字码</label><input id="airport-query" class="input" value="{{search}}" bindinput="changeSearch" placeholder="例如：首都机场 / PEK / 北京" maxlength="100" confirm-type="search" /></view>
+    <view class="field"><label class="field-label" for="terminal-query">航站楼（选填）</label><input id="terminal-query" class="input" value="{{terminal}}" bindinput="changeTerminal" placeholder="例如：T2" maxlength="60" confirm-type="search" /></view>
+    <view class="zone-filters"><button wx:for="{{zones}}" wx:key="value" class="zone-filter {{zone === item.value ? 'selected' : ''}}" data-value="{{item.value}}" bindtap="changeZone" aria-pressed="{{zone === item.value}}">{{item.label}}</button></view>
+    <view wx:if="{{filtered}}" class="clear-row"><button class="text-button" bindtap="clearFilters">清除筛选</button></view>
+  </view>
+  <view class="registry-note">{{demo ? '演示银行与贵宾厅均为虚构示例，不可用于实际出行。' : '仅查询已登记资料，出行前请向银行或贵宾厅核实。'}}</view>
+  <view wx:if="{{refreshing || outdated}}" class="notice" role="status"><text>{{refreshing ? '正在更新已登记资料…' : error}}</text><button wx:if="{{outdated}}" class="text-button" bindtap="load">重新刷新</button></view>
+  <view wx:if="{{loading}}" class="empty" role="status">正在读取已登记的贵宾厅…</view>
+  <view wx:elif="{{failed}}" class="empty"><view class="empty-title">资料暂时无法加载</view><text>{{error}}</text><button class="secondary" bindtap="load">重新加载</button></view>
+  <block wx:else>
+    <view wx:if="{{matches.length}}" class="result-summary" role="status">找到 {{matches.length}} 条贵宾厅资料</view>
+    <view wx:for="{{matches}}" wx:key="key" class="lounge-card">
+      <view class="airport-line"><text>{{item.airport}}</text><text wx:if="{{item.airportCode}}" class="airport-code">{{item.airportCode}}</text></view>
+      <view class="lounge-title">{{item.title}}</view>
+      <view class="location-line">{{item.city ? item.city + ' · ' : ''}}{{item.terminal}} · {{item.zoneLabel}}</view>
+      <view class="supported-banks">
+        <view class="bank-heading">支持的银行</view>
+        <view wx:if="{{item.supportedBanks.length}}" class="bank-list"><text wx:for="{{item.supportedBanks}}" wx:for-item="bank" wx:key="*this" class="bank-label">{{bank}}</text></view>
+        <view wx:else class="bank-unknown">尚未登记支持银行</view>
+        <text class="bank-help">具体卡种与客户条件见下方</text>
+      </view>
+      <view class="access-rules">
+        <view class="rule-row"><text class="rule-label">预约</text><view><view class="rule-value">{{item.reservation}}</view><view wx:if="{{item.reservationNote}}" class="rule-detail">{{item.reservationNote}}</view></view></view>
+        <view class="rule-row"><text class="rule-label">客户资格</text><view><view class="rule-value">{{item.customerScope}}</view><view class="rule-detail">{{item.customerNote || '具体卡种与客户条件尚未登记，请先核实。'}}</view></view></view>
+        <view class="rule-row"><text class="rule-label">同行人</text><view class="rule-detail">{{item.guestNote || '携伴规则未登记，请提前核实。'}}</view></view>
+      </view>
+      <view class="additional-info">
+        <view><text class="info-label">营业时间</text><text>{{item.openingHours || '未登记，请核实'}}</text></view>
+        <view><text class="info-label">具体位置</text><text>{{item.location || '未登记，请核实'}}</text></view>
+        <view wx:if="{{item.sourceNote}}"><text class="info-label">资料来源</text><text>{{item.sourceNote}}</text></view>
+        <view><text class="info-label">核实日期</text><text>{{item.verifiedOn || '尚未登记'}}</text></view>
+      </view>
+    </view>
+    <view wx:if="{{!matches.length}}" class="empty"><view class="empty-title">未找到已登记的贵宾厅</view><text>{{filtered ? '试试其他机场名称、城市或三字码，也可以清除筛选。' : entitlementId ? '这项权益还没有贵宾厅登记，或已归档。' : '在贵宾厅权益中补充机场、支持银行与准入条件，即可在这里查询。'}}</text><text class="subtitle">这不代表该机场没有贵宾厅。</text><button wx:if="{{filtered}}" class="secondary" bindtap="clearFilters">清除筛选</button><button wx:if="{{entitlementId}}" class="secondary" bindtap="clearScope">查询全部权益</button><button wx:if="{{!registeredCount && !entitlementId}}" class="primary" bindtap="addLoungeBenefit">登记贵宾厅资料</button></view>
+  </block>
+</view>

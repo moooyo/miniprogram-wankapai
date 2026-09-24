@@ -1,17 +1,17 @@
 import { Dashboard, Participation } from '../../../shared/contracts';
 import { banks } from '../../../shared/catalog';
 import { api, ensureSession } from '../../services/api';
-import { money, stageLabel, showError, today } from '../../services/format';
+import { money, periodLabel, stageLabel, showError, today } from '../../services/format';
 import { cardLabel } from '../../services/card-labels';
 import { benefitCopy } from '../../services/benefit-copy';
-import { addDays } from '../../../domain/calendar';
+import { addDays, periodFor } from '../../../domain/calendar';
 
 type Filter = 'unfinished' | 'completed' | 'all';
 type TaskAction = 'progress' | 'complete' | 'receipt' | 'detail' | 'resume';
 type TaskGroup = 'overdue' | 'soon' | 'later' | '';
 interface TaskRow {
   id: string; activityId: string; title: string; bank: string; logo: string;
-  dateDay: string; dateMonth: string; deadline: string; status: string; progress: string;
+  dateDay: string; dateMonth: string; deadline: string; period: string; showPeriod: boolean; status: string; progress: string;
   reward: string; rewardLabel: string; estimate: string; cardName: string; closed: boolean; skipped: boolean; late: boolean; pending: boolean;
   primaryAction: TaskAction; primaryLabel: string; resultNote: string;
   groupKey: TaskGroup; groupTitle: string; groupCount: number; showGroupTitle: boolean;
@@ -24,32 +24,50 @@ function nextAction(record: Participation): TaskAction {
   return record.snapshot.target > 1 && record.progress < record.snapshot.target ? 'progress' : 'complete';
 }
 
+function recordPeriodLabel(record: Participation): string {
+  const label = periodLabel(record.periodKey);
+  return record.periodKey === 'once' ? `${label} · ${record.startsOn} 至 ${record.endsOn}` : label;
+}
+
 Page({
   data: {
-    loading: true, failed: false, busyId: '', filter: 'unfinished' as Filter,
+    loading: true, refreshing: false, refreshError: '', outdated: false, mutationNotice: '', failed: false, busyId: '', filter: 'unfinished' as Filter,
     closingOnly: false, monthLabel: '', dateLabel: '', tasks: [] as TaskRow[],
     raw: null as Dashboard | null, unfinishedCount: 0, completedCount: 0,
     allCount: 0, pendingCount: 0, nearestBill: '', billCount: 0,
-    showActions: false, actionId: '', actionTitle: '', actionStage: '', actionCardName: '',
+    showActions: false, actionId: '', actionTitle: '', actionStage: '', actionCardName: '', actionPeriod: '', actionDeadline: '',
     actionReceiptLabel: '', actionCanComplete: false, actionCanProgress: false,
   },
+  loadVersion: 0,
+  disposed: false,
+  onUnload() { this.disposed = true; this.loadVersion += 1; },
   onShow() { void this.load(); },
   async onPullDownRefresh() { await this.load(); wx.stopPullDownRefresh(); },
   async load() {
-    this.setData({ loading: true, failed: false });
+    if (this.disposed) return;
+    const version = ++this.loadVersion;
+    this.setData({ loading: !this.data.raw, refreshing: !!this.data.raw, refreshError: '', failed: false, showActions: false });
     try {
       await ensureSession();
+      if (this.disposed || version !== this.loadVersion) return;
       const raw = await api.query('dashboard.get', {});
+      if (this.disposed || version !== this.loadVersion) return;
       const date = raw.today || today();
       const openBills = raw.bills.filter(bill => !bill.paidAt).sort((a, b) => a.dueOn.localeCompare(b.dueOn));
-      this.setData({ raw, dateLabel: `${Number(date.slice(5, 7))} 月 ${Number(date.slice(8))} 日`,
+      this.setData({ raw, outdated: false, mutationNotice: '', dateLabel: `${Number(date.slice(5, 7))} 月 ${Number(date.slice(8))} 日`,
         monthLabel: `${Number(date.slice(5, 7))} 月底前截止`, pendingCount: raw.pendingRewards.length,
         nearestBill: openBills[0] ? `${Number(openBills[0].dueOn.slice(5, 7))}/${Number(openBills[0].dueOn.slice(8))}` : '',
         billCount: openBills.length });
       this.applyFilter();
-    } catch (error) { this.setData({ failed: true }); showError(error); }
-    finally { this.setData({ loading: false }); }
+    } catch (error) {
+      if (!this.disposed && version === this.loadVersion) {
+        if (this.data.raw) this.setData({ outdated: true, refreshError: `${this.data.mutationNotice}待办尚未更新，以下为上次读取的记录。请刷新成功后再操作。` });
+        else { this.setData({ failed: true }); showError(error); }
+      }
+    }
+    finally { if (!this.disposed && version === this.loadVersion) this.setData({ loading: false, refreshing: false }); }
   },
+  actionsBlocked(): boolean { return this.disposed || !this.data.raw || this.data.refreshing || this.data.outdated || !!this.data.busyId; },
   applyFilter() {
     const raw = this.data.raw;
     if (!raw) return;
@@ -68,9 +86,11 @@ Page({
       const primaryLabel = primaryAction === 'progress' ? '更新进度' : primaryAction === 'complete' ? '标记完成' : primaryAction === 'receipt' ? copy.recordAction : primaryAction === 'resume' ? '恢复参与' : '查看记录';
       const groupKey: TaskGroup = this.data.filter !== 'unfinished' ? '' : p.endsOn < date ? 'overdue' : p.endsOn <= soonUntil ? 'soon' : 'later';
       const groupTitle = groupKey === 'overdue' ? '已逾期' : groupKey === 'soon' ? '未来7天内截止' : groupKey === 'later' ? '其他活动' : '';
+      const currentPeriod = periodFor(p.snapshot, date);
       return { id: p.id, activityId: p.activityId, title: p.snapshot.title,
         bank: bank?.shortName || '', logo: bank?.logo || '', dateDay: String(Number(p.endsOn.slice(8))),
         dateMonth: `${Number(p.endsOn.slice(5, 7))}月`, deadline: p.endsOn,
+        period: recordPeriodLabel(p), showPeriod: currentPeriod?.periodKey !== p.periodKey || p.startsOn.slice(0, 4) !== p.endsOn.slice(0, 4),
         status: stageLabel(p), progress: remaining > 0 ? `还差 ${remaining} ${p.snapshot.unit}` : '目标已达成',
         reward: money(p.stage === 'received' ? p.receivedMinor ?? p.snapshot.rewardMinor : p.snapshot.rewardMinor, p.snapshot.currency),
         rewardLabel: p.stage === 'received' ? copy.actualLabel : copy.expectedLabel,
@@ -103,12 +123,13 @@ Page({
     this.applyFilter();
   },
   openTask(event: WechatMiniprogram.TouchEvent) {
+    if (this.actionsBlocked()) return;
     const row = this.data.raw?.tasks.find(item => item.id === event.currentTarget.dataset.id);
     this.setData({ showActions: false });
     if (row) wx.navigateTo({ url: `/pages/detail/index?id=${encodeURIComponent(row.activityId)}&participationId=${encodeURIComponent(row.id)}` });
   },
   async runPrimaryAction(event: WechatMiniprogram.TouchEvent) {
-    if (this.data.busyId) return;
+    if (this.actionsBlocked()) return;
     const row = this.data.raw?.tasks.find(item => item.id === event.currentTarget.dataset.id);
     if (!row) return;
     const action = nextAction(row);
@@ -119,7 +140,7 @@ Page({
     else this.openTask(event);
   },
   editProgress(event: WechatMiniprogram.TouchEvent) {
-    if (this.data.busyId) return;
+    if (this.actionsBlocked()) return;
     const id = event.currentTarget.dataset.id || this.data.actionId;
     const row = this.data.raw?.tasks.find(item => item.id === id);
     if (!row || ['completed', 'received', 'skipped'].includes(row.stage)) return;
@@ -127,6 +148,7 @@ Page({
     wx.navigateTo({ url: `/pages/progress/index?id=${encodeURIComponent(row.id)}&activityId=${encodeURIComponent(row.activityId)}` });
   },
   receipt(event: WechatMiniprogram.TouchEvent) {
+    if (this.actionsBlocked()) return;
     const id = event.currentTarget.dataset.id || this.data.actionId;
     const row = this.data.raw?.tasks.find(item => item.id === id);
     this.setData({ showActions: false });
@@ -134,30 +156,34 @@ Page({
   },
   async complete(event: WechatMiniprogram.TouchEvent) {
     const id = event.currentTarget.dataset.id || this.data.actionId;
-    if (!id || this.data.busyId) return;
+    if (!id || this.actionsBlocked()) return;
     const row = this.data.raw?.tasks.find(item => item.id === id);
     if (!row || row.stage === 'skipped') return;
     this.setData({ busyId: id, showActions: false });
     try {
       await api.command('participation.complete', { participationId: id });
+      if (this.disposed) return;
+      this.setData({ mutationNotice: '完成状态已保存。' });
       wx.showToast({ title: benefitCopy(row.snapshot.rewardKind).completedToast, icon: 'none' });
       await this.load();
-    } catch (error) { showError(error); }
-    finally { this.setData({ busyId: '' }); }
+    } catch (error) { if (!this.disposed) showError(error); }
+    finally { if (!this.disposed) this.setData({ busyId: '' }); }
   },
   showMore(event: WechatMiniprogram.TouchEvent) {
+    if (this.actionsBlocked()) return;
     const row = this.data.raw?.tasks.find(item => item.id === event.currentTarget.dataset.id);
     if (row) {
       const copy = benefitCopy(row.snapshot.rewardKind);
       const unfinished = !['completed', 'received', 'skipped'].includes(row.stage);
       this.setData({ showActions: true, actionId: row.id, actionTitle: row.snapshot.title, actionStage: row.stage,
+        actionPeriod: recordPeriodLabel(row), actionDeadline: row.endsOn,
         actionCardName: cardLabel(row.cardId, this.data.raw?.cards || []), actionCanComplete: unfinished, actionCanProgress: unfinished,
         actionReceiptLabel: row.stage === 'completed' ? copy.recordAction : copy.completeAndRecordAction });
     }
   },
   closeActions() { this.setData({ showActions: false }); },
   async toggleSkip(event?: WechatMiniprogram.TouchEvent) {
-    if (this.data.busyId) return;
+    if (this.actionsBlocked()) return;
     const id = event?.currentTarget.dataset.id || this.data.actionId;
     const row = this.data.raw?.tasks.find(item => item.id === id);
     if (!row || ['completed', 'received'].includes(row.stage)) return;
@@ -165,18 +191,28 @@ Page({
     this.setData({ busyId: id, showActions: false });
     try {
       await api.command('participation.skip', { participationId: id, skipped });
-      await this.load();
+      if (this.disposed) return;
+      this.setData({ mutationNotice: skipped ? '本期跳过状态已保存。' : '本期参与已恢复。' });
       wx.showToast({ title: skipped ? '本期已跳过' : '已恢复本期参与', icon: 'none' });
-    } catch (error) { showError(error); }
-    finally { this.setData({ busyId: '' }); }
+      await this.load();
+    } catch (error) { if (!this.disposed) showError(error); }
+    finally { if (!this.disposed) this.setData({ busyId: '' }); }
   },
   async undoComplete() {
-    if (this.data.busyId) return;
+    if (this.actionsBlocked()) return;
     const id = this.data.actionId;
+    const row = this.data.raw?.tasks.find(item => item.id === id);
+    if (!row || row.stage !== 'completed') return;
     this.setData({ busyId: id, showActions: false });
-    try { await api.command('participation.undoComplete', { participationId: id }); await this.load(); }
-    catch (error) { showError(error); }
-    finally { this.setData({ busyId: '' }); }
+    try {
+      await api.command('participation.undoComplete', { participationId: id });
+      if (this.disposed) return;
+      this.setData({ mutationNotice: '撤销完成已保存。' });
+      wx.showToast({ title: '已撤销完成', icon: 'none' });
+      await this.load();
+    }
+    catch (error) { if (!this.disposed) showError(error); }
+    finally { if (!this.disposed) this.setData({ busyId: '' }); }
   },
   browse() { wx.switchTab({ url: '/pages/activities/index' }); },
   openHistory() { wx.navigateTo({ url: '/pages/history/index' }); },

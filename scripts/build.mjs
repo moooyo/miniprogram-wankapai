@@ -1,7 +1,9 @@
 import { build } from 'esbuild';
+import assert from 'node:assert/strict';
 import { cp, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { checkNativePackage } from './check-native-package.mjs';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const client=path.join(root,'miniprogram');
@@ -28,13 +30,52 @@ for(const file of await files(client)){
     await writeFile(target,`<demo-notice />\n${markup}\n<privacy-gate />\n`);
   }else await cp(file,target);
 }
-const singletonPlugin={name:'shared-mini-program-services',setup(builder){
-  builder.onResolve({filter:/(?:services\/(?:api|privacy)|runtime-config)$/},args=>{
-    if(args.kind==='entry-point')return null;
-    return {path:args.path,external:true};
+const sharedModules = new Map([
+  ['services/api.ts', 'services/api.js'],
+  ['services/privacy.ts', 'services/privacy.js'],
+  ['runtime-config.js', 'runtime-config.js'],
+].map(([source, target]) => [path.join(client, source), path.join(output, target)]));
+const demoSource = path.join(client, 'services', 'demo.ts');
+const apiSource = path.join(client, 'services', 'api.ts');
+const configSource = path.join(client, 'runtime-config.js');
+
+function singletonPlugin(outfile) {
+  const resolving = {};
+  return {
+    name: 'shared-mini-program-services',
+    setup(builder) {
+      builder.onResolve({ filter: /.*/ }, async args => {
+        if (args.kind === 'entry-point' || args.pluginData === resolving) return null;
+        const resolved = await builder.resolve(args.path, {
+          importer: args.importer, namespace: args.namespace, resolveDir: args.resolveDir,
+          kind: args.kind, pluginData: resolving, with: args.with,
+        });
+        if (resolved.errors.length) return { errors: resolved.errors, warnings: resolved.warnings };
+        const target = sharedModules.get(resolved.path);
+        if (!target) return null;
+        const relative = path.relative(path.dirname(outfile), target).split(path.sep).join('/');
+        // A transitive import is relative to its final bundle, not its source helper.
+        return { path: relative.startsWith('.') ? relative : `./${relative}`, external: true };
+      });
+    },
+  };
+}
+
+await Promise.all(entries.map(async entry => {
+  const outfile = path.join(output, path.relative(client, entry).replace(/\.ts$/, '.js'));
+  const result = await build({
+    absWorkingDir: root, entryPoints: [entry], outfile, bundle: true, platform: 'neutral', format: 'cjs',
+    target: 'es2018', sourcemap: false, metafile: true, plugins: [singletonPlugin(outfile)], logLevel: 'warning',
   });
-}};
-await build({entryPoints:entries,outdir:output,outbase:client,bundle:true,platform:'neutral',format:'cjs',target:'es2018',sourcemap:false,plugins:[singletonPlugin],logLevel:'info'});
+  const inputs = new Set(Object.keys(result.metafile.inputs).map(filename => path.resolve(root, filename)));
+  assert.ok(!inputs.has(configSource), 'Runtime configuration must remain an external package file.');
+  for (const source of sharedModules.keys()) {
+    assert.ok(!inputs.has(source) || source === entry, `Shared module was bundled into ${path.relative(client, entry)}: ${path.relative(client, source)}`);
+  }
+  assert.ok(!inputs.has(demoSource) || entry === apiSource, 'The demo runtime must only be bundled into the shared API entry.');
+}));
+const nativeReport = checkNativePackage(output);
+console.log(`Native package integrity passed: ${nativeReport.pages} pages, ${nativeReport.components} components, ${nativeReport.services} services, ${nativeReport.apps} app, and ${nativeReport.configurationFiles} configuration file.`);
 for(const name of ['api','reminders']){
   const source=path.join(root,'cloudfunctions',name),destination=path.join(root,'dist','cloudfunctions',name);
   await mkdir(destination,{recursive:true});

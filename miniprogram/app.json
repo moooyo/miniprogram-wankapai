@@ -2,7 +2,8 @@
   "pages": [
     "pages/todo/index", "pages/activities/index", "pages/rewards/index", "pages/wallet/index", "pages/mine/index",
     "pages/detail/index", "pages/progress/index", "pages/receipt/index", "pages/history/index", "pages/card-edit/index",
-    "pages/submissions/index", "pages/submission-lead/index", "pages/submission-edit/index", "pages/review/index", "pages/preferences/index", "pages/web-entry/index"
+    "pages/submissions/index", "pages/submission-lead/index", "pages/submission-edit/index", "pages/review/index", "pages/preferences/index", "pages/web-entry/index",
+    "pages/entitlements/index", "pages/entitlement-edit/index", "pages/lounges/index"
   ],
   "window": { "navigationBarTitleText": "权益清单", "navigationBarTextStyle": "black", "navigationBarBackgroundColor": "#ffffff", "backgroundColor": "#f4f7fb", "backgroundTextStyle": "dark" },
   "tabBar": {

@@ -1,15 +1,17 @@
-page { --brand:#1f61d8; --ink:#172230; --muted:#626f82; --line:#e5ebf3; --surface:#fff; --page:#f4f7fb; color:var(--ink); background:var(--page); font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif; font-size:16px; line-height:1.55; }
+page { --brand:#1f61d8; --ink:#172230; --muted:#626f82; --line:#e5ebf3; --surface:#fff; --page:#f4f7fb; --danger:#ac3737; --success:#326548; --tint:#eef5ff; --control-border:#98a8be; --radius:12px; --touch-size:48px; color:var(--ink); background:var(--page); font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif; font-size:16px; line-height:1.55; }
 view,text,button,input,textarea,picker,scroll-view { box-sizing:border-box; }
 button { font-size:14px; font-weight:500; line-height:1.5; border-radius:9px; min-height:48px; display:flex; align-items:center; justify-content:center; padding:10px 15px; margin:0; }
 /* Override the native v2 button size while preserving page-specific widths. */
 button:not([size=mini]) { width:auto; margin:0; }
 button::after { border:0; }
-button[disabled] { opacity:.45; }
+button[disabled] { opacity:.55; }
+button:active:not([disabled]) { opacity:.78; }
+button,input,textarea,picker { overflow-wrap:anywhere; }
 .page { padding:16px 16px 28px; }
 .surface { background:#fff; border:1px solid var(--line); border-radius:12px; padding:16px; }
 .row { display:flex; align-items:center; gap:8px; }
 .row-between { display:flex; align-items:center; justify-content:space-between; gap:10px; }
-.text-muted { color:var(--muted); font-size:12px; }
+.text-muted { color:var(--muted); font-size:14px; }
 .section-title { font-weight:600; font-size:17px; }
 .primary { background:var(--brand); color:#fff; border:1px solid var(--brand); }
 .secondary { color:var(--brand); background:#eef5ff; border:1px solid #d9e7fb; }
@@ -17,5 +19,6 @@ button[disabled] { opacity:.45; }
 .input { width:100%; min-height:48px; border:1px solid #98a8be; padding:10px 12px; border-radius:8px; background:#fff; color:var(--ink); font-size:16px; }
 .bottom-bar { position:fixed; left:0; right:0; bottom:0; z-index:10; background:#fff; border-top:1px solid var(--line); padding:10px 16px calc(10px + env(safe-area-inset-bottom)); display:flex; gap:10px; }
 .bottom-bar button { flex:1; }
-.error { color:#ac3737; font-size:13px; }
+.error { color:var(--danger); font-size:14px; }
+.pagination-error { display:block; color:var(--danger); font-size:14px; line-height:1.6; padding:12px 0; }
 .empty { color:var(--muted); text-align:center; padding:36px 16px; font-size:14px; }

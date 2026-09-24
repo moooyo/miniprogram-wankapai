@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>权益清单 · 完整交互原型</title>
+  <style>/* PROTOTYPE_STYLES */</style>
+</head>
+<body>
+  <header class="workbench-header">
+    <div class="wordmark"><span class="mark" aria-hidden="true">权</span><div><strong>权益清单</strong><span>完整交互原型</span></div></div>
+    <div class="workbench-note">19 个页面 · 源码同步 · 仅演示数据</div>
+    <button id="reset-prototype" class="quiet-button">重置演示</button>
+  </header>
+  <main class="workbench">
+    <details class="flow-overview"><summary>完整操作流程图 <span>展开查看路径与关联页面</span></summary><div class="flow-lines" id="flow-map" aria-label="主要操作流程图"></div><p>每个节点都可进入对应页面；同一流程中的页面共享演示记录。页面内的弹层、分支与操作状态可在右侧清单逐项检查。</p></details>
+    <aside class="atlas-panel">
+      <details open class="atlas-details"><summary>页面导航图 <span>19</span></summary><p class="panel-help">按真实操作流程浏览，也可直接进入任一页面。</p><nav id="page-atlas" aria-label="全部原型页面"></nav></details>
+      <div class="atlas-legend"><span class="legend-dot"></span>已浏览 <span class="legend-ring"></span>当前页面</div>
+      <p class="source-note">页面布局与交互来自小程序源码。填写内容保存在此浏览器，任何操作都不会影响真实账号。</p>
+    </aside>
+    <section class="device-column" aria-label="交互预览">
+      <div class="preview-toolbar"><span id="screen-position">待办</span><div><button id="refresh-page" class="quiet-button">刷新</button><label class="width-control"><span>宽度</span><select id="viewport-width" aria-label="预览宽度"><option value="390">390</option><option value="320">320</option><option value="430">430</option></select></label></div></div>
+      <div class="device" id="device"><div class="device-status"><span>9:41</span><span aria-hidden="true">● ● ●　▰</span></div><div class="native-navigation"><button id="native-back" aria-label="返回上一页">‹</button><strong id="native-title">权益清单</strong><span class="native-capsule" aria-hidden="true">··· │ ○</span></div><div id="native-page"></div><nav id="native-tabs" aria-label="底部导航"></nav><div id="platform-layer"></div><div id="toast" role="status" aria-live="polite"></div></div>
+      <p class="device-caption">点击预览中的按钮、日期和表单即可操作。</p>
+    </section>
+    <aside class="inspection-panel">
+      <section><div class="panel-eyebrow">关键流程</div><h1>从发现活动<br>到确认每笔收益</h1><p class="panel-help">常用路径已准备好，所有流程共享同一份演示记录。</p><div id="scenario-list" class="scenario-list"></div></section>
+      <section class="inspector-section"><h2>状态与反馈</h2><p class="panel-help">验证加载、失败恢复与权限边界。</p><div class="state-controls"><button id="slow-next">慢速加载</button><button id="fail-next">本页加载失败</button><button id="fail-read">下次读取失败</button><button id="fail-save">下次保存失败</button><button id="conflict-record">模拟并发修改</button><button id="privacy-scenario">隐私授权</button></div><p id="scenario-feedback" class="scenario-feedback" role="status"></p></section>
+      <details class="inspector-section"><summary>当前页操作清单 <span id="action-count"></span></summary><p class="panel-help">根据 WXML 绑定自动生成；隐藏操作可通过对应场景或状态出现。</p><div id="action-list"></div></details>
+      <details class="inspector-section"><summary>原型覆盖与边界</summary><p class="panel-help">19 个原生页面、全部 WXML 操作绑定、页面弹层与表单均由源码生成。业务写入复用真实的演示服务。微信提醒、跨小程序跳转、隐私政策、图片文件与剪贴板使用浏览器适配，不代表真机或云端验收。</p><p id="coverage-summary" class="panel-help"></p></details>
+    </aside>
+  </main>
+  <script>/* PROTOTYPE_MANIFEST */</script>
+  <script>/* PROTOTYPE_BUNDLE */</script>
+</body>
+</html>

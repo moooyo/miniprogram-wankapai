@@ -10,6 +10,11 @@ export interface SavedFormDraft<T> {
 
 const prefix = 'card-benefits.form-draft.v1';
 let revisionSequence = 0;
+let commandIntentSequence = 0;
+
+export function createCommandIntent(): string {
+  return `form_${Date.now().toString(36)}_${(++commandIntentSequence).toString(36)}_${Math.random().toString(36).slice(2)}_${Math.random().toString(36).slice(2)}`;
+}
 
 function stableFingerprint(value: unknown): string {
   if (Array.isArray(value)) return '[' + value.map(stableFingerprint).join(',') + ']';

@@ -1,39 +1,77 @@
 import { Bill, BillingAccount, Card, Wallet } from '../../../shared/contracts';
 import { banks, issuers } from '../../../shared/catalog';
 import { api, ensureSession, requestReminder } from '../../services/api';
-import { periodLabel, showError, today } from '../../services/format';
+import { periodLabel, showError } from '../../services/format';
 import { cardLabel, cardNeedsNickname } from '../../services/card-labels';
 
 const networkLabels: Record<string, string> = { visa: 'Visa', mastercard: 'Mastercard', unionpay: '银联', amex: 'American Express', other: '其他卡组织' };
 interface CardRow { id: string; title: string; description: string; bank: string; logo: string; issuer: string; credit: boolean; needsNickname: boolean; }
-interface BillRow { id: string; dueOn: string; dateLabel: string; period: string; paid: boolean; late: boolean; }
-interface AccountGroup { id: string; title: string; logo: string; subtitle: string; cards: CardRow[]; primaryCardId: string; bills: BillRow[]; primaryBill: BillRow | null; otherBills: BillRow[]; statement: string; expanded: boolean; archived: boolean; settledArchive: boolean; }
+interface BillRow { id: string; dueOn: string; dateLabel: string; period: string; paid: boolean; late: boolean; reminderExpired: boolean; }
+interface AccountGroup { id: string; title: string; logo: string; identity: string; subtitle: string; cards: CardRow[]; primaryCardId: string; bills: BillRow[]; primaryBill: BillRow | null; otherBills: BillRow[]; statement: string; expanded: boolean; archived: boolean; settledArchive: boolean; reminderAvailable: boolean; }
+
+function archivedAccountIdentity(account: BillingAccount, accounts: BillingAccount[], cards: Card[]): string {
+  const describe = (target: BillingAccount) => {
+    const ownedCards = cards.filter(card => card.ownerId === target.ownerId);
+    const linkedCards = ownedCards.filter(card => card.billingAccountId === target.id)
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id));
+    const names = linkedCards.map(card => cardLabel(card.id, ownedCards).replace(/（已移除）$/, '')).join('、');
+    return { id: target.id, label: target.label.trim() || names || '信用卡账单', names, createdAt: linkedCards[0]?.createdAt || '' };
+  };
+  const current = describe(account);
+  const peers = accounts.filter(item => item.ownerId === account.ownerId && item.bankId === account.bankId && item.issuerId === account.issuerId)
+    .map(describe).filter(item => item.label === current.label);
+  if (peers.length < 2) return current.label;
+  const withCards = (item: ReturnType<typeof describe>) => item.names && item.names !== item.label ? `${item.label} · 原卡：${item.names}` : item.label;
+  const label = withCards(current);
+  const duplicates = peers.filter(item => withCards(item) === label)
+    .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id));
+  return duplicates.length > 1 ? `${label} · 同名账单${duplicates.findIndex(item => item.id === account.id) + 1}` : label;
+}
+
+function billReminderEligible(bill: Bill | undefined, accounts: BillingAccount[], serverToday: string, repaymentEnabled: boolean | null): boolean {
+  return !!bill && !!serverToday && !bill.paidAt && bill.dueOn >= serverToday && repaymentEnabled === true
+    && accounts.some(account => account.id === bill.billingAccountId && account.ownerId === bill.ownerId && account.enabled);
+}
 
 Page({
-  data: { loading: true, failed: false, busyId: '', reminderBusyId: '', reminderNoticeId: '', reminderNotice: '', demo: false, repaymentEnabled: null as boolean | null, cardCount: 0, bankCount: 0, groups: [] as AccountGroup[], looseCards: [] as CardRow[], namingCards: [] as CardRow[], raw: null as Wallet | null },
+  data: { loading: true, refreshing: false, refreshError: '', outdated: false, failed: false, busyId: '', reminderBusyId: '', reminderNoticeId: '', reminderNotice: '', demo: false, serverToday: '', repaymentEnabled: null as boolean | null, cardCount: 0, bankCount: 0, groups: [] as AccountGroup[], looseCards: [] as CardRow[], namingCards: [] as CardRow[], raw: null as Wallet | null },
+  loadVersion: 0,
   onShow() { void this.load(); },
   async onPullDownRefresh() { await this.load(); wx.stopPullDownRefresh(); },
-  async load() {
-    this.setData({ loading: true, failed: false });
+  async load(forceSession = false) {
+    const version = ++this.loadVersion;
+    this.setData({ loading: !this.data.raw, refreshing: !!this.data.raw, refreshError: '', failed: false });
     try {
-      const session = await ensureSession();
+      const session = await ensureSession(forceSession === true);
       const [raw, preferences] = await Promise.all([
         api.query('wallet.get', {}),
         api.query('preferences.get', {}).catch(() => null),
       ]);
+      if (version !== this.loadVersion) return;
       const cards = raw.cards.filter(card => !card.archivedAt);
       const liveAccounts = raw.accounts.filter(account => account.enabled && cards.some(card => card.billingAccountId === account.id));
       const visibleAccounts = raw.accounts.filter(account => liveAccounts.some(live => live.id === account.id) || raw.bills.some(bill => bill.billingAccountId === account.id));
-      const groups = visibleAccounts.map(account => this.accountGroup(account, cards, raw.bills, raw.cards)).sort((a, b) => {
+      const groups = visibleAccounts.map(account => this.accountGroup(account, cards, raw.bills, raw.cards, raw.accounts, session.today)).sort((a, b) => {
         const left = a.primaryBill, right = b.primaryBill;
         return Number(!!left?.paid) - Number(!!right?.paid) || (left?.dueOn || '9999').localeCompare(right?.dueOn || '9999');
       });
       const attached = new Set(liveAccounts.map(account => account.id));
-      this.setData({ raw, groups, demo: session.demo, repaymentEnabled: preferences?.repayments ?? null, cardCount: cards.length, bankCount: new Set(cards.map(card => card.bankId)).size,
+      const notifiedBill = raw.bills.find(bill => bill.id === this.data.reminderNoticeId);
+      const previousNotifiedBill = this.data.raw?.bills.find(bill => bill.id === this.data.reminderNoticeId);
+      const keepReminderNotice = billReminderEligible(notifiedBill, raw.accounts, session.today, preferences?.repayments ?? null)
+        && notifiedBill?.dueOn === previousNotifiedBill?.dueOn && notifiedBill?.ownerId === previousNotifiedBill?.ownerId
+        && notifiedBill?.billingAccountId === previousNotifiedBill?.billingAccountId;
+      this.setData({ raw, groups, outdated: false, demo: session.demo, serverToday: session.today, repaymentEnabled: preferences?.repayments ?? null, cardCount: cards.length, bankCount: new Set(cards.map(card => card.bankId)).size,
+        reminderNoticeId: keepReminderNotice ? this.data.reminderNoticeId : '', reminderNotice: keepReminderNotice ? this.data.reminderNotice : '',
         namingCards: cards.map(card => this.cardRow(card, raw.cards)).filter(card => card.needsNickname),
         looseCards: cards.filter(card => !card.billingAccountId || !attached.has(card.billingAccountId)).map(card => this.cardRow(card, raw.cards)) });
-    } catch (error) { this.setData({ failed: true }); showError(error); }
-    finally { this.setData({ loading: false }); }
+    } catch (error) {
+      if (version === this.loadVersion) {
+        if (this.data.raw) this.setData({ outdated: true, refreshError: '卡包尚未更新，以下为上次读取的记录。请刷新成功后再修改账单。' });
+        else { this.setData({ failed: true }); showError(error); }
+      }
+    }
+    finally { if (version === this.loadVersion) this.setData({ loading: false, refreshing: false }); }
   },
   cardRow(card: Card, cards: Card[]): CardRow {
     const bank = banks.find(item => item.id === card.bankId);
@@ -43,35 +81,42 @@ Page({
       bank: bank?.name || '', logo: bank?.logo || '', issuer: issuer?.name || '', credit: card.kind === 'credit',
       needsNickname: cardNeedsNickname(card.id, cards) };
   },
-  billRow(bill: Bill): BillRow {
+  billRow(bill: Bill, serverToday: string): BillRow {
+    const reminderExpired = !bill.paidAt && bill.dueOn < serverToday;
     return { id: bill.id, dueOn: bill.dueOn, dateLabel: `${Number(bill.dueOn.slice(5, 7))} 月 ${Number(bill.dueOn.slice(8))} 日`,
-      period: periodLabel(bill.periodKey), paid: !!bill.paidAt, late: !bill.paidAt && bill.dueOn < today() };
+      period: periodLabel(bill.periodKey), paid: !!bill.paidAt, late: reminderExpired, reminderExpired };
   },
-  accountGroup(account: BillingAccount, cards: Card[], bills: Bill[], allCards: Card[]): AccountGroup {
+  accountGroup(account: BillingAccount, cards: Card[], bills: Bill[], allCards: Card[], allAccounts: BillingAccount[], serverToday: string): AccountGroup {
     const members = cards.filter(card => card.billingAccountId === account.id);
     const bank = banks.find(item => item.id === account.bankId);
     const issuer = issuers.find(item => item.id === account.issuerId);
-    const accountBills = bills.filter(bill => bill.billingAccountId === account.id).sort((a, b) => Number(!!a.paidAt) - Number(!!b.paidAt) || (a.paidAt && b.paidAt ? b.dueOn.localeCompare(a.dueOn) : a.dueOn.localeCompare(b.dueOn))).map(bill => this.billRow(bill));
+    const accountBills = bills.filter(bill => bill.billingAccountId === account.id).sort((a, b) => Number(!!a.paidAt) - Number(!!b.paidAt) || (a.paidAt && b.paidAt ? b.dueOn.localeCompare(a.dueOn) : a.dueOn.localeCompare(b.dueOn))).map(bill => this.billRow(bill, serverToday));
     const cardRows = members.map(card => this.cardRow(card, allCards));
     const archived = !account.enabled || members.length === 0;
     const settledArchive = archived && accountBills.every(bill => bill.paid);
     return { id: account.id, title: issuer?.name || bank?.name || account.label, logo: bank?.logo || '',
+      identity: archived ? archivedAccountIdentity(account, allAccounts, allCards) : '',
       subtitle: archived ? settledArchive ? '历史账单均已标记还款' : '卡片已移除，待还账单继续保留' : members.length > 1 ? `${members.length} 张卡共用账单` : cardRows[0]?.title || account.label,
       cards: cardRows, primaryCardId: members[0]?.id || '', bills: accountBills,
       primaryBill: accountBills[0] || null, otherBills: accountBills.slice(1),
-      statement: archived ? '账户已归档，不再生成新账单。' : `每月 ${account.statementDay} 日出账 · 微信提醒时间为还款日前 ${account.remindDays} 天，需单独授权。`,
-      expanded: this.data.groups.find(group => group.id === account.id)?.expanded || false, archived, settledArchive };
+      statement: !account.enabled ? '账户已停用，不再生成新账单或发送微信提醒。历史账单仍可标记还款和修改日期。' : archived ? '账户已归档，不再生成新账单。' : `每月 ${account.statementDay} 日出账 · 微信提醒时间为还款日前 ${account.remindDays} 天，需单独授权。`,
+      expanded: this.data.groups.find(group => group.id === account.id)?.expanded || false, archived, settledArchive, reminderAvailable: account.enabled };
   },
   addCard() { wx.navigateTo({ url: '/pages/card-edit/index' }); },
-  editCard(event: WechatMiniprogram.TouchEvent) { wx.navigateTo({ url: `/pages/card-edit/index?id=${encodeURIComponent(event.currentTarget.dataset.id)}` }); },
+  editCard(event: WechatMiniprogram.TouchEvent) {
+    if (this.data.loading || this.data.refreshing || this.data.outdated || this.data.busyId || this.data.reminderBusyId) return;
+    wx.navigateTo({ url: `/pages/card-edit/index?id=${encodeURIComponent(event.currentTarget.dataset.id)}` });
+  },
   openPreferences() { wx.navigateTo({ url: '/pages/preferences/index' }); },
+  openEntitlements() { if (!this.data.busyId && !this.data.reminderBusyId) wx.navigateTo({ url: '/pages/entitlements/index' }); },
+  openLounges() { if (!this.data.busyId && !this.data.reminderBusyId) wx.navigateTo({ url: '/pages/lounges/index' }); },
   toggleGroup(event: WechatMiniprogram.TouchEvent) {
     this.setData({ groups: this.data.groups.map(group => group.id === event.currentTarget.dataset.id ? { ...group, expanded: !group.expanded } : group) });
   },
   async togglePaid(event: WechatMiniprogram.TouchEvent) {
     const id = event.currentTarget.dataset.id;
     const bill = this.data.raw?.bills.find(item => item.id === id);
-    if (!bill || this.data.busyId || this.data.reminderBusyId) return;
+    if (!bill || this.data.loading || this.data.refreshing || this.data.outdated || this.data.busyId || this.data.reminderBusyId) return;
     this.setData({ busyId: id });
     try {
       await api.command('bill.update', { id, paid: !bill.paidAt });
@@ -83,7 +128,7 @@ Page({
   async changeDueDate(event: WechatMiniprogram.PickerChange) {
     const id = event.currentTarget.dataset.id;
     const dueOn = String(event.detail.value);
-    if (!id || this.data.busyId || this.data.reminderBusyId) return;
+    if (!id || this.data.loading || this.data.refreshing || this.data.outdated || this.data.busyId || this.data.reminderBusyId) return;
     this.setData({ busyId: id });
     try { await api.command('bill.update', { id, dueOn }); wx.showToast({ title: '本期日期已更新', icon: 'none' }); await this.load(); }
     catch (error) { showError(error); }
@@ -92,7 +137,20 @@ Page({
   async requestBillReminder(event: WechatMiniprogram.TouchEvent) {
     const id = event.currentTarget.dataset.id;
     const bill = this.data.raw?.bills.find(item => item.id === id);
-    if (!bill || bill.paidAt || this.data.busyId || this.data.reminderBusyId) return;
+    if (this.data.loading || this.data.refreshing || this.data.outdated || this.data.busyId || this.data.reminderBusyId) return;
+    const account = this.data.raw?.accounts.find(item => item.id === bill?.billingAccountId);
+    if (!bill || bill.paidAt || !account?.enabled) {
+      this.setData({ reminderNoticeId: '', reminderNotice: '' });
+      if (bill && !bill.paidAt) wx.showToast({ title: account ? '账户已停用，历史账单不提供微信提醒。' : '账单账户暂不可用，请刷新后重试。', icon: 'none' });
+      return;
+    }
+    if (!this.data.serverToday || bill.dueOn < this.data.serverToday) {
+      this.setData({ reminderNoticeId: '', reminderNotice: '' });
+      wx.showToast({ title: this.data.serverToday ? '已逾期，不补发微信提醒。仍可标记还款和修改日期。' : '当前日期暂未读取，请刷新后重试。', icon: 'none' });
+      return;
+    }
+    const loadVersion = this.loadVersion;
+    const requestScope = { ownerId: bill.ownerId, billingAccountId: bill.billingAccountId, dueOn: bill.dueOn };
     this.setData({ reminderBusyId: id, reminderNoticeId: '', reminderNotice: '' });
     try {
       if (!this.data.demo && this.data.repaymentEnabled !== true) {
@@ -105,8 +163,15 @@ Page({
         return;
       }
       const accepted = await requestReminder('repayment', bill.id);
-      if (accepted) this.setData({ reminderNoticeId: id, reminderNotice: '本期微信提醒已申请，下一期需要重新授权。' });
-    } catch (error) { showError(error); }
+      const currentBill = this.data.raw?.bills.find(item => item.id === id);
+      if (accepted && loadVersion === this.loadVersion && billReminderEligible(currentBill, this.data.raw?.accounts || [], this.data.serverToday, this.data.repaymentEnabled)
+        && currentBill?.dueOn === requestScope.dueOn && currentBill?.ownerId === requestScope.ownerId && currentBill?.billingAccountId === requestScope.billingAccountId) {
+        this.setData({ reminderNoticeId: id, reminderNotice: '本期微信提醒已申请，下一期需要重新授权。' });
+      }
+    } catch (error) {
+      showError(error);
+      if ((error as { code?: string })?.code === 'REMINDER_UNAVAILABLE') await this.load(true);
+    }
     finally { this.setData({ reminderBusyId: '' }); }
   },
   browseMine() { wx.setStorageSync('activities.mineOnly', true); wx.switchTab({ url: '/pages/activities/index' }); },

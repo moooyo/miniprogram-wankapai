@@ -2,10 +2,13 @@
   "collections": [
     "activities", "activity_revisions", "submissions", "cards", "billing_accounts", "bills",
     "trackings", "participations", "rewards", "assets", "audit_events", "preferences",
-    "requests", "reminder_jobs", "reminder_grants"
+    "requests", "reminder_jobs", "reminder_grants", "entitlements", "entitlement_usages"
   ],
   "clientRulesFile": "database.rules.json",
   "indexes": [
+    { "collection": "entitlements", "fields": [["ownerId", "asc"], ["endsOn", "asc"], ["id", "asc"], ["_id", "asc"]] },
+    { "collection": "entitlement_usages", "fields": [["ownerId", "asc"], ["entitlementId", "asc"], ["usedOn", "desc"], ["createdAt", "desc"], ["id", "asc"], ["_id", "asc"]] },
+    { "collection": "cards", "fields": [["ownerId", "asc"], ["createdAt", "desc"], ["_id", "asc"]] },
     { "collection": "activities", "fields": [["status", "asc"], ["_id", "asc"]] },
     { "collection": "activities", "fields": [["status", "asc"], ["endsOn", "asc"], ["id", "asc"], ["_id", "asc"]] },
     { "collection": "submissions", "fields": [["ownerId", "asc"], ["status", "asc"], ["updatedAt", "desc"], ["id", "asc"], ["_id", "asc"]] },
@@ -26,6 +29,6 @@
     { "collection": "reminder_grants", "fields": [["ownerId", "asc"], ["kind", "asc"], ["entityId", "asc"], ["templateId", "asc"], ["remaining", "asc"], ["_id", "asc"]] },
     { "collection": "reminder_jobs", "fields": [["status", "asc"], ["dueOn", "desc"], ["id", "asc"], ["_id", "asc"]] }
   ],
-  "ownerIndexCollections": ["cards", "billing_accounts", "bills", "participations", "trackings", "rewards", "assets", "audit_events"],
+  "ownerIndexCollections": ["cards", "billing_accounts", "bills", "participations", "trackings", "rewards", "assets", "audit_events", "entitlements", "entitlement_usages"],
   "ownerIndexFields": [["ownerId", "asc"], ["_id", "asc"]]
 }

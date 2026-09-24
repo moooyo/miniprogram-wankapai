@@ -15,11 +15,11 @@
 .picker-field{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:48px;padding:11px 12px;word-break:break-word}
 .picker-field>text{flex:none;color:var(--muted,#626f82)}
 .placeholder{color:#657389}
-.field-hint,.privacy-copy{display:block;font-size:13px;line-height:1.65;color:var(--muted,#626f82)}
+.field-hint,.privacy-copy{display:block;font-size:14px;line-height:1.65;color:var(--muted,#626f82)}
 .field-hint{margin-top:8px}
 .privacy-copy{margin:16px 0 0}
-.field-error{display:block;margin-top:8px;font-size:13px;line-height:1.6;color:#a43128}
-.draft-status{display:block;margin:-8px 0 16px;font-size:13px;line-height:1.65;color:var(--muted,#626f82)}
+.field-error{display:block;margin-top:8px;font-size:14px;line-height:1.6;color:#a43128}
+.draft-status{display:block;margin:-8px 0 16px;font-size:14px;line-height:1.65;color:var(--muted,#626f82)}
 .status-notice,.return-notice,.error-banner{margin-bottom:16px;padding:12px 16px;border-radius:8px;font-size:14px;line-height:1.65;word-break:break-word}
 .status-notice{background:#edf4ff;color:var(--ink,#172230)}
 .return-notice{background:#fff6ea;color:#874311}
@@ -30,8 +30,8 @@
 .image-preview{display:flex;flex:1;align-items:center;gap:12px;min-width:0;min-height:64px;margin:0;padding:8px 0;background:transparent;color:var(--ink,#172230);font-size:14px;text-align:left}
 .image-thumbnail{width:48px;height:48px;flex:none;border-radius:6px;background:var(--page,#f4f7fb)}
 .image-label{flex:1;min-width:0;word-break:break-word}
-.image-status{flex:none;color:var(--brand,#1f61d8);font-size:12px}
-.remove-image{flex:none;min-width:48px;min-height:48px;margin:0;padding:8px;background:transparent;color:#9c3429;font-size:13px}
+.image-status{flex:none;color:var(--brand,#1f61d8);font-size:14px}
+.remove-image{flex:none;min-width:48px;min-height:48px;margin:0;padding:8px;background:transparent;color:#9c3429;font-size:14px}
 button.upload-button,button.copy-button{display:flex;align-items:center;justify-content:center;min-height:48px;margin:12px 0;padding:8px 12px;border-radius:8px;background:#edf4ff;color:var(--brand,#1f61d8);font-size:14px}
 button.copy-button{margin:0 0 20px}
 .text-button{display:flex;align-items:center;justify-content:center;min-height:48px;padding:8px 12px;background:transparent;color:var(--brand,#1f61d8);font-size:14px}

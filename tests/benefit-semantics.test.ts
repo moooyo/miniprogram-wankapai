@@ -8,9 +8,11 @@ import type { Activity, ApiRequest, Commands, Detail, MutationResult, Participat
 import { banks, issuers } from '../shared/catalog';
 import { MemoryStore } from '../domain/memory-store';
 import { createService } from '../domain/service';
+import { periodFor } from '../domain/calendar';
 import { benefitCopy, BenefitKind } from '../miniprogram/services/benefit-copy';
 import * as format from '../miniprogram/services/format';
 import * as cardLabels from '../miniprogram/services/card-labels';
+import * as entrance from '../miniprogram/services/entrance';
 
 function activity(id: string, kind: BenefitKind, currency: 'CNY' | 'HKD' = 'CNY'): Activity {
   return {
@@ -57,12 +59,14 @@ function controller(name: string, participation = record('discount')) {
   const commands: Array<{ action: string; payload: any }> = [];
   const toasts: string[] = [];
   const titles: string[] = [];
+  const returns: Array<{ activityId: string; participationId: string }> = [];
   let instance: any;
   const source = ts.transpileModule(readFileSync(path.join(process.cwd(), `miniprogram/pages/${name}/index.ts`), 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
   }).outputText;
   runInNewContext(source, {
     exports: {},
+    getCurrentPages: () => instance ? [instance] : [],
     Page(definition: any) {
       instance = { ...definition, data: structuredClone(definition.data), setData(patch: Record<string, unknown>, callback?: () => void) {
         for (const [key, value] of Object.entries(patch)) {
@@ -77,9 +81,15 @@ function controller(name: string, participation = record('discount')) {
     require(module: string) {
       if (module.endsWith('/benefit-copy')) return { benefitCopy };
       if (module.endsWith('/catalog')) return { banks, issuers };
+      if (module.endsWith('/calendar')) return { periodFor };
       if (module.endsWith('/card-labels')) return cardLabels;
+      if (module.endsWith('/entrance')) return entrance;
+      if (module.endsWith('/navigation')) return {
+        navigateBackOr() {},
+        backToActivity(activityId: string, participationId: string) { returns.push({ activityId, participationId }); },
+      };
       if (module.endsWith('/format')) return { ...format, today: () => '2026-09-21', showError(error: unknown) { throw error; } };
-      if (module.endsWith('/form-draft')) return { loadDraft: () => null, getDraftRevision: () => null, removeDraft() {}, saveDraft: () => true, confirmDraftRecovery: async () => false };
+      if (module.endsWith('/form-draft')) return { loadDraft: () => null, getDraftRevision: () => null, removeDraft() {}, saveDraft: () => true, createCommandIntent: () => 'benefit-form-intent', confirmDraftRecovery: async () => false };
       if (module.endsWith('/api')) return {
         ensureSession: async () => ({ userId: 'benefit-owner', today: '2026-09-21', month: '2026-09', demo: true }),
         requestReminder: async (kind: string, id: string) => { requests.push({ kind, id }); return false; },
@@ -103,7 +113,7 @@ function controller(name: string, participation = record('discount')) {
       nextTick: (callback: () => void) => callback(), pageScrollTo() {},
     },
   });
-  return { page: instance, commands, requests, toasts, titles };
+  return { page: instance, commands, requests, toasts, titles, returns };
 }
 
 test('benefit copy and stage labels preserve cashback and distinguish actual discounts', () => {
@@ -177,6 +187,7 @@ test('discount receipt form records actual discounts without changing persisted 
   assert.equal(h.commands[0].payload.expectedVersion, 3);
   assert.equal(h.commands[0].payload.amountMinor, 2750);
   assert.equal(h.toasts.at(-1), '已记录优惠');
+  assert.deepEqual(h.returns, [{ activityId: item.activityId, participationId: item.id }]);
 });
 
 test('discount details block expected-reward reminders while retaining active deadline reminders', async () => {

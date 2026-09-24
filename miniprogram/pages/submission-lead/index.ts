@@ -2,14 +2,16 @@ import { api, ensureSession, uploadImage, previewAssets } from '../../services/a
 import type { ActivityLead, Asset, Submission } from '../../../shared/contracts';
 import { banks } from '../../../shared/catalog';
 import { validatePublicHttps } from '../../../domain/validation';
-import { loadDraft, saveDraft, removeDraft, getDraftRevision, confirmDraftRecovery } from '../../services/form-draft';
+import { loadDraft, saveDraft, removeDraft, getDraftRevision, confirmDraftRecovery, createCommandIntent } from '../../services/form-draft';
 
 type LeadField = keyof ActivityLead;
 type InputEvent = { currentTarget: { dataset: { field?: string; id?: string } }; detail: { value: string } };
-type SavedLeadInput = { lead: ActivityLead };
+type PendingLeadCreation = { pending: true; intentKey: string; lead: ActivityLead };
+type SavedLeadInput = { lead: ActivityLead; intentKey?: string; pendingCreation?: PendingLeadCreation };
 type DraftContext = { ownerId: string; entityId: string; revision: string | null; generation: number };
 const draftScope = 'submission-lead';
 const leadFields: LeadField[] = ['title', 'bankId', 'sourceUrl', 'sourceNote', 'imageIds'];
+const rejectedCreationCodes = new Set(['INVALID_INPUT', 'INVALID_DATE', 'INVALID_ASSET', 'NOT_FOUND', 'CONFLICT', 'FORBIDDEN', 'IMMUTABLE', 'REQUEST_CONFLICT', 'VERSION_CONFLICT', 'INVALID_STATE', 'INVALID_ACTION']);
 
 function freshLead(bankId = ''): ActivityLead {
   return { title: '', bankId, sourceUrl: '', sourceNote: '', imageIds: [] };
@@ -27,14 +29,24 @@ function messageOf(error: unknown, fallback: string): string {
   }
   return fallback;
 }
+function uploadFailureText(message: string): string {
+  if (/privacy permission is not authorized/i.test(message)) return '尚未同意隐私指引，本次未添加图片。可继续填写，或再次添加图片时阅读并选择是否同意。';
+  if (/(?:chooseMedia|chooseImage|album|photo).*?(?:auth|permission|deny|denied|拒绝|权限)/i.test(message)) return '无法访问照片，请在微信设置中允许相册权限后重试。';
+  if (!/(?:chooseMedia|chooseImage|getImageInfo|uploadFile|saveFile):/i.test(message) && /[\u3400-\u9fff]/.test(message)) return message;
+  if (/network|timeout|timed out|connection|uploadFile/i.test(message)) return '图片上传失败，请检查网络后重试。';
+  return '图片未能添加，请检查照片权限和网络后重试。';
+}
 
 Page({
   disposed: false,
   loadGeneration: 0,
   imageGeneration: 0,
+  previewSequence: 0,
+  creationIntentKey: '',
+  pendingCreation: null as PendingLeadCreation | null,
   draftBaseVersion: null as number | null,
   data: {
-    loading: true, ready: false, saving: false, submitted: false, reloading: false, uploading: false, loadingImages: false,
+    loading: true, ready: false, saving: false, submitted: false, pendingCreationUnconfirmed: false, reloading: false, uploading: false, loadingImages: false,
     denied: false, readOnly: false, fullSubmission: false, conflict: false, dirty: false, error: '', imageError: '', localDraftStatus: '',
     submissionId: '', submission: null as Submission | null, ownerId: '',
     lead: freshLead(), errors: {} as Partial<Record<LeadField, string>>,
@@ -43,13 +55,15 @@ Page({
     imageRows: [] as { id: string; label: string; url: string }[],
   },
   onLoad(options: { id?: string; bankId?: string }) {
+    this.creationIntentKey = createCommandIntent();
     this.setData({ submissionId: options.id || '', lead: freshLead(banks.some(bank => bank.id === options.bankId) ? options.bankId : '') });
     void this.load();
   },
-  onHide() { if (!this.disposed && !this.data.saving && !this.data.reloading) this.persistDraft(); },
+  onHide() { this.previewSequence++; if (!this.disposed && !this.data.saving && !this.data.reloading) this.persistDraft(); },
   onUnload() { this.disposed = true; this.loadGeneration++; this.imageGeneration++; },
   async load() {
     if (this.disposed || this.data.saving || this.data.submitted || this.data.reloading || this.data.uploading) return;
+    if (!this.creationIntentKey) this.creationIntentKey = createCommandIntent();
     const generation = ++this.loadGeneration;
     this.imageGeneration++;
     this.setData({ loading: true, ready: false, denied: false, fullSubmission: false, error: '', loadingImages: false });
@@ -67,14 +81,31 @@ Page({
         const entityId = this.draftEntityId();
         const saved = loadDraft<SavedLeadInput>(draftScope, session.userId, entityId);
         const revision = getDraftRevision(draftScope, session.userId, entityId);
-        const recover = saved && isSavedInput(saved.value) && await confirmDraftRecovery(saved, this.draftBaseVersion);
+        if (saved?.value.pendingCreation !== undefined && !isSavedInput(saved.value)) {
+          this.setData({ pendingCreationUnconfirmed: true, error: '上次提交的恢复信息不完整，已保留本机副本。请先到“我的投稿”核对，暂不能再次新建。' });
+          return;
+        }
+        const recover = saved && isSavedInput(saved.value) && (saved.value.pendingCreation !== undefined || await confirmDraftRecovery(saved, this.draftBaseVersion));
         if (this.disposed || generation !== this.loadGeneration) return;
         if (saved && recover) {
+          if (!this.data.submissionId) this.creationIntentKey = typeof saved.value.intentKey === 'string' && saved.value.intentKey.length >= 1 && saved.value.intentKey.length <= 128 ? saved.value.intentKey : createCommandIntent();
+          const pending = saved.value.pendingCreation;
+          if (!this.data.submissionId && pending !== undefined) {
+            if (pending?.pending === true && typeof pending.intentKey === 'string' && pending.intentKey.length >= 1 && pending.intentKey.length <= 128 && isSavedInput({ lead: pending.lead })) {
+              this.pendingCreation = JSON.parse(JSON.stringify(pending)) as PendingLeadCreation;
+              this.creationIntentKey = pending.intentKey;
+            }
+            this.setData({ pendingCreationUnconfirmed: true });
+          }
           const stale = saved.baseVersion !== this.draftBaseVersion;
           this.draftBaseVersion = typeof saved.baseVersion === 'number' ? saved.baseVersion : null;
           this.setData({ lead: saved.value.lead, dirty: true, conflict: stale, localDraftStatus: '已恢复本机草稿，尚未提交', error: stale ? '草稿基于旧版本，暂不能提交。请先复制需要保留的内容，再读取最新线索核对。' : '' });
+          if (this.pendingCreation) this.persistDraft();
           wx.enableAlertBeforeUnload({ message: '草稿已保存在本机，尚未提交。' });
-        } else if (saved) removeDraft(draftScope, session.userId, entityId, revision);
+        } else if (saved) {
+          if (!this.data.submissionId) this.creationIntentKey = createCommandIntent();
+          removeDraft(draftScope, session.userId, entityId, revision);
+        }
       }
       this.syncOptions();
       void this.loadImages();
@@ -85,6 +116,8 @@ Page({
     }
   },
   applyLead(submission: Submission | null, ownerId: string) {
+    this.pendingCreation = null;
+    this.setData({ pendingCreationUnconfirmed: false });
     const lead = submission?.lead ? JSON.parse(JSON.stringify(submission.lead)) as ActivityLead : freshLead(this.data.lead.bankId);
     const readOnly = submission?.status === 'published';
     this.draftBaseVersion = submission?.version ?? null;
@@ -99,14 +132,14 @@ Page({
     });
   },
   draftEntityId(): string { return this.data.submissionId || 'new'; },
-  canEdit(): boolean { return !this.disposed && this.data.ready && !this.data.loading && !this.data.readOnly && !this.data.denied && !this.data.saving && !this.data.submitted && !this.data.reloading; },
+  canEdit(): boolean { return !this.disposed && this.data.ready && !this.data.loading && !this.data.readOnly && !this.data.denied && !this.data.saving && !this.data.submitted && !this.data.reloading && !this.data.pendingCreationUnconfirmed; },
   draftContext(): DraftContext {
     return { ownerId: this.data.ownerId, entityId: this.draftEntityId(), revision: getDraftRevision(draftScope, this.data.ownerId, this.draftEntityId()), generation: this.loadGeneration };
   },
   persistDraft(): boolean {
-    if (!this.canEdit() || !this.data.dirty) return false;
-    const saved = saveDraft<SavedLeadInput>(draftScope, this.data.ownerId, this.draftEntityId(), this.draftBaseVersion, { lead: this.data.lead });
-    this.setData({ localDraftStatus: saved ? '本机草稿已保存，尚未提交' : '草稿未能保存在本机，请勿关闭页面' });
+    if (this.disposed || !this.data.ready || this.data.readOnly || this.data.denied || this.data.saving || this.data.submitted || this.data.reloading || !this.data.dirty || (this.data.pendingCreationUnconfirmed && !this.pendingCreation)) return false;
+    const saved = saveDraft<SavedLeadInput>(draftScope, this.data.ownerId, this.draftEntityId(), this.draftBaseVersion, { lead: this.data.lead, ...(!this.data.submissionId ? { intentKey: this.creationIntentKey, ...(this.pendingCreation ? { pendingCreation: this.pendingCreation } : {}) } : {}) });
+    this.setData({ localDraftStatus: saved ? this.data.pendingCreationUnconfirmed ? '原提交内容已保存在本机，等待确认结果' : '本机草稿已保存，尚未提交' : '草稿未能保存在本机，请勿关闭页面' });
     return saved;
   },
   saveLocalDraft() {
@@ -142,7 +175,7 @@ Page({
     if (!this.canEdit() || this.data.uploading) return;
     if (this.data.lead.imageIds.length >= 6) { wx.showToast({ title: '最多添加 6 张图片', icon: 'none' }); return; }
     const generation = this.loadGeneration;
-    this.setData({ uploading: true, imageError: '' });
+    this.setData({ uploading: true });
     try {
       const asset = await uploadImage();
       if (this.disposed || generation !== this.loadGeneration) return;
@@ -150,8 +183,10 @@ Page({
       this.markDirty();
       await this.loadImages();
     } catch (error) {
-      const message = messageOf(error, '图片上传失败，请重试。');
-      if (!this.disposed && generation === this.loadGeneration && !/cancel|取消/i.test(message)) this.setData({ imageError: message });
+      const message = typeof error === 'string' ? error
+        : error && typeof error === 'object' && 'errMsg' in error && typeof error.errMsg === 'string' && error.errMsg.trim() ? error.errMsg
+        : messageOf(error, '图片未能添加，请检查照片权限和网络后重试。');
+      if (!this.disposed && generation === this.loadGeneration && !/cancel|取消/i.test(message)) this.setData({ imageError: uploadFailureText(message) });
     } finally {
       if (!this.disposed && generation === this.loadGeneration) this.setData({ uploading: false });
     }
@@ -184,13 +219,21 @@ Page({
     if (this.disposed || this.data.loadingImages) return;
     const generation = this.loadGeneration;
     const id = event.currentTarget.dataset.id;
+    if (!this.data.lead.imageIds.includes(id)) return;
+    const previewSequence = ++this.previewSequence;
     if (!this.data.assets.some(asset => asset.id === id)) await this.loadImages();
     if (this.disposed || generation !== this.loadGeneration || !this.data.lead.imageIds.includes(id)) return;
     const assets = this.data.lead.imageIds.map(imageId => this.data.assets.find(asset => asset.id === imageId)).filter((asset): asset is Asset => !!asset);
     const index = assets.findIndex(asset => asset.id === id);
     if (index < 0) { this.setData({ imageError: '这张图片暂时无法查看，请重试读取。' }); return; }
-    try { await previewAssets(assets, index); }
-    catch (error) { if (!this.disposed && generation === this.loadGeneration) this.setData({ imageError: messageOf(error, '图片暂时无法打开，请重试。') }); }
+    const galleryIds = this.data.lead.imageIds.slice();
+    const shouldOpen = () => {
+      const pages = getCurrentPages();
+      return !this.disposed && generation === this.loadGeneration && previewSequence === this.previewSequence && pages[pages.length - 1] === this
+        && galleryIds.length === this.data.lead.imageIds.length && galleryIds.every((imageId, position) => imageId === this.data.lead.imageIds[position]);
+    };
+    try { await previewAssets(assets, index, shouldOpen); }
+    catch (error) { if (shouldOpen()) this.setData({ imageError: messageOf(error, '图片暂时无法打开，请重试。') }); }
   },
   copySource() {
     if (this.disposed) return;
@@ -221,27 +264,61 @@ Page({
     return lead;
   },
   async save() {
-    if (!this.canEdit() || this.data.uploading || this.data.conflict || this.data.fullSubmission) return;
+    if (this.disposed || !this.data.ready || this.data.loading || this.data.readOnly || this.data.denied || this.data.saving || this.data.submitted || this.data.reloading || this.data.uploading || this.data.conflict || this.data.fullSubmission) return;
+    if (this.data.pendingCreationUnconfirmed && !this.pendingCreation) { this.setData({ error: '上次提交的恢复信息不完整，已保留本机副本。请先到“我的投稿”核对，暂不能再次新建。' }); return; }
     this.setData({ error: '' });
-    const lead = this.validate();
+    const lead = this.pendingCreation ? JSON.parse(JSON.stringify(this.pendingCreation.lead)) as ActivityLead : this.validate();
     if (!lead) return;
+    const creating = !this.data.submissionId;
+    if (creating) {
+      const previousPending = this.pendingCreation;
+      this.pendingCreation = previousPending || { pending: true, intentKey: this.creationIntentKey, lead };
+      this.creationIntentKey = this.pendingCreation.intentKey;
+      this.setData({ dirty: true, pendingCreationUnconfirmed: true });
+      if (!this.persistDraft()) {
+        this.pendingCreation = previousPending;
+        this.setData({ pendingCreationUnconfirmed: !!previousPending, error: '提交恢复信息未能保存在本机，请重试保存草稿后再提交。' });
+        return;
+      }
+    }
     const context = this.draftContext();
+    const intentKey = this.pendingCreation?.intentKey || this.creationIntentKey;
     const submissionId = this.data.submissionId;
     const expectedVersion = this.data.submission?.version;
     this.setData({ saving: true });
     try {
-      await api.command('submission.lead.save', { ...(submissionId ? { id: submissionId, expectedVersion } : {}), lead });
+      const payload = { ...(submissionId ? { id: submissionId, expectedVersion } : {}), lead };
+      if (submissionId) await api.command('submission.lead.save', payload);
+      else {
+        const result = await api.command('submission.lead.save', payload, { intentKey });
+        if (!result || typeof result.id !== 'string' || !result.id) throw Object.assign(new Error('提交结果暂时无法确认，请重试确认原提交。'), { code: 'INVALID_RESPONSE' });
+      }
       this.finish(context);
     } catch (error) {
+      const code = error && typeof error === 'object' && 'code' in error && typeof error.code === 'string' ? error.code : '';
+      if (creating && rejectedCreationCodes.has(code)) this.clearRejectedCreation(context, intentKey);
       if (!this.disposed && context.generation === this.loadGeneration) this.showFailure(error);
     } finally {
       if (!this.disposed && context.generation === this.loadGeneration) this.setData({ saving: false });
     }
   },
+  clearRejectedCreation(context: DraftContext, intentKey: string) {
+    if (getDraftRevision(draftScope, context.ownerId, context.entityId) === context.revision) {
+      const saved = loadDraft<SavedLeadInput>(draftScope, context.ownerId, context.entityId);
+      if (saved?.value.pendingCreation?.intentKey === intentKey) {
+        const { pendingCreation, ...value } = saved.value;
+        saveDraft(draftScope, context.ownerId, context.entityId, saved.baseVersion, value);
+      }
+    }
+    if (!this.disposed && context.generation === this.loadGeneration && this.pendingCreation?.intentKey === intentKey) {
+      this.pendingCreation = null;
+      this.setData({ pendingCreationUnconfirmed: false });
+    }
+  },
   showFailure(error: unknown) {
     if (this.disposed) return;
     const code = error && typeof error === 'object' && 'code' in error ? error.code : '';
-    if (code === 'VERSION_CONFLICT' || code === 'IMMUTABLE' || code === 'INVALID_STATE') {
+    if (this.data.submissionId && (code === 'VERSION_CONFLICT' || code === 'IMMUTABLE' || code === 'INVALID_STATE')) {
       this.setData({ conflict: true, error: '线索内容或审核状态已更新。本次填写仍保留在页面中，请复制需要保留的内容，再读取最新线索核对。' }); return;
     }
     const field = error && typeof error === 'object' && 'field' in error && typeof error.field === 'string' ? error.field.replace(/^lead\./, '') as LeadField : undefined;
@@ -276,7 +353,8 @@ Page({
   finish(context: DraftContext) {
     removeDraft(draftScope, context.ownerId, context.entityId, context.revision);
     if (this.disposed || context.generation !== this.loadGeneration) return;
-    this.setData({ dirty: false, submitted: true });
+    this.pendingCreation = null;
+    this.setData({ dirty: false, submitted: true, pendingCreationUnconfirmed: false });
     wx.disableAlertBeforeUnload();
     wx.showToast({ title: '线索已提交审核', icon: 'success' });
     wx.navigateBack({ delta: 1, fail: () => { if (!this.disposed && context.generation === this.loadGeneration) wx.redirectTo({ url: '/pages/submissions/index' }); } });

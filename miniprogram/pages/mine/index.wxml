@@ -1,22 +1,27 @@
 <view class="mine-page">
-  <view class="page-heading"><text class="page-title">我的</text><text class="page-description">整理自己的权益，也分享值得参加的活动。</text></view>
-  <view wx:if="{{error}}" class="feedback error" role="alert"><text>{{error}}</text><button class="text-button" bindtap="load">重试</button></view>
-  <view wx:if="{{loading}}" class="loading">正在读取…</view>
-  <block wx:else>
-    <view class="group"><button class="menu-row" bindtap="openHistory"><view class="menu-copy"><text class="menu-title">全部参与记录</text><text class="menu-description">查看往期参与、返现与优惠，按记录更正或恢复</text></view><text class="chevron" aria-hidden="true">›</text></button></view>
+  <view class="page-heading"><text class="page-title">我的</text><text class="page-description">管理参与记录、投稿和提醒。</text></view>
+  <view wx:if="{{error}}" class="feedback error" role="alert"><text>{{error}}</text><button class="text-button" bindtap="load" disabled="{{loading || countsLoading || changingRole}}">重新读取账号</button></view>
+  <view wx:if="{{countsError}}" class="feedback error" role="alert"><text>{{countsError}}</text><button class="text-button" bindtap="load" disabled="{{loading || countsLoading || changingRole}}">重试投稿状态</button></view>
+  <view wx:if="{{loading}}" class="loading" role="status">正在确认账号信息…</view>
+  <block>
     <view class="group">
-      <button class="menu-row" bindtap="openSubmissions"><view class="menu-copy"><text class="menu-title">我的投稿</text><text class="menu-description">{{returnedCount ? '有投稿需要补充' : pendingCount ? '有投稿等待审核' : '查看投稿与审核结果'}}</text></view><text class="chevron" aria-hidden="true">›</text></button>
-      <button class="menu-row" bindtap="openSubmission"><view class="menu-copy"><text class="menu-title">分享活动线索</text><text class="menu-description">填写银行、标题和来源，运营补齐后公开</text></view><text class="chevron" aria-hidden="true">›</text></button>
+      <button class="menu-row" bindtap="openHistory"><view class="menu-copy"><text class="menu-title">全部参与记录</text><text class="menu-description">往期进度、返现与优惠</text></view><text class="chevron" aria-hidden="true">›</text></button>
+      <button class="menu-row" bindtap="openSubmissions"><view class="menu-copy"><text class="menu-title">我的投稿</text><text class="menu-description">{{countsLoading ? '正在更新投稿状态…' : countsReady && returnedCount ? '有投稿需要补充' : countsReady && pendingCount ? '有投稿等待审核' : '查看投稿与审核结果'}}</text></view><text class="chevron" aria-hidden="true">›</text></button>
+      <button class="menu-row" bindtap="openPreferences"><view class="menu-copy"><text class="menu-title">提醒设置</text><text class="menu-description">新活动、截止、到账与还款</text></view><text class="chevron" aria-hidden="true">›</text></button>
+    </view>
+    <view class="tools-group">
+      <button class="tool-entry" bindtap="openEntitlements" aria-label="当前持有权益"><text class="tool-title">持有权益</text><text class="tool-description">余量、期限与规则</text></button>
+      <button class="tool-entry" bindtap="openLounges" aria-label="机场贵宾厅速查"><text class="tool-title">贵宾厅速查</text><text class="tool-description">按机场查支持银行</text></button>
     </view>
     <view class="group">
-      <button class="menu-row" bindtap="openPreferences"><view class="menu-copy"><text class="menu-title">提醒设置</text><text class="menu-description">截止、待到账与信用卡还款</text></view><text class="chevron" aria-hidden="true">›</text></button>
+      <button class="menu-row" bindtap="openSubmission"><view class="menu-copy"><text class="menu-title">分享活动线索</text><text class="menu-description">银行、名称和一种来源即可</text></view><text class="chevron" aria-hidden="true">›</text></button>
       <button class="menu-row" bindtap="showPrivacy"><view class="menu-copy"><text class="menu-title">数据与隐私</text><text class="menu-description">个人记录与公开内容的范围</text></view><text class="chevron" aria-hidden="true">›</text></button>
     </view>
     <view wx:if="{{session.isModerator}}" class="group">
       <button class="menu-row" bindtap="openReview"><view class="menu-copy"><text class="menu-title">活动审核</text><text class="menu-description">核实来源、补齐规则、处理投稿</text></view><text class="chevron" aria-hidden="true">›</text></button>
     </view>
     <view wx:if="{{session.demo}}" class="demo-section">
-      <view class="demo-heading"><text>演示角色</text><picker range="{{['普通用户', '运营审核']}}" value="{{session.isModerator ? 1 : 0}}" bindchange="changeDemoRole" disabled="{{changingRole}}"><view class="role-picker">{{session.isModerator ? '运营审核' : '普通用户'}}<text aria-hidden="true">⌄</text></view></picker></view>
+      <view class="demo-heading"><text>演示角色</text><picker range="{{['普通用户', '运营审核']}}" value="{{session.isModerator ? 1 : 0}}" bindchange="changeDemoRole" disabled="{{changingRole}}" aria-label="演示角色，{{session.isModerator ? '运营审核' : '普通用户'}}"><view class="role-picker">{{session.isModerator ? '运营审核' : '普通用户'}}<text aria-hidden="true">⌄</text></view></picker></view>
       <text class="small-copy">当前使用演示数据。正式环境的运营权限由账号授权决定。</text>
     </view>
   </block>

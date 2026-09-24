@@ -1,10 +1,11 @@
 <view class="submissions-page">
   <view class="page-heading"><view><text class="page-title">我的投稿</text><text class="page-description">审核通过后，活动才会公开。</text></view><button class="new-button" bindtap="create">分享活动</button></view>
-  <view wx:if="{{error}}" class="error"><text>{{error}}</text><button class="text-button" bindtap="load">重试</button></view>
-  <view wx:if="{{loading}}" class="loading">正在读取投稿…</view>
-  <view wx:elif="{{!items.length}}" class="empty"><text class="empty-title">还没有分享过活动</text><text class="page-description">填上银行、活动标题，再附链接、银行路径或截图，即可交给运营补齐核实。</text><button class="primary-button" bindtap="create">分享第一个活动</button></view>
-  <view wx:else class="submission-list">
-    <button wx:for="{{items}}" wx:key="id" class="submission-row" bindtap="open" data-id="{{item.id}}">
+  <view wx:if="{{error}}" class="error" role="alert"><text>{{error}}</text><text wx:if="{{items.length}}" class="refresh-copy">{{sessionVerified ? '当前显示上次读取的投稿。' : '已保留列表位置。账号暂未核实，重新核实后显示投稿。'}}</text><button class="text-button" bindtap="load" disabled="{{loading}}">{{sessionVerified ? '重新读取投稿' : '重新核实账号'}}</button></view>
+  <text wx:if="{{loading && items.length}}" class="refresh-notice" role="status">{{sessionVerified ? '正在更新投稿，已显示的内容仍保留…' : '正在核实账号，核实通过后显示投稿…'}}</text>
+  <view wx:if="{{loading && !items.length}}" class="loading">{{sessionVerified ? '正在读取投稿…' : '正在核实账号…'}}</view>
+  <view wx:elif="{{!items.length && !error}}" class="empty"><text class="empty-title">还没有分享过活动</text><text class="page-description">填上银行、活动标题，再附链接、银行路径或截图，即可交给运营补齐核实。</text><button class="primary-button" bindtap="create">分享第一个活动</button></view>
+  <view wx:else class="submission-list {{!sessionVerified ? 'is-session-pending' : ''}}" aria-hidden="{{!sessionVerified}}">
+    <button wx:for="{{items}}" wx:key="id" class="submission-row" bindtap="open" data-id="{{item.id}}" disabled="{{!sessionVerified}}">
       <view class="row-top"><text class="bank-name">{{item.bankName}}</text><text class="status {{item.status}}">{{item.statusLabel}}</text></view>
       <text class="submission-title">{{item.titleText}}</text>
       <text class="page-description">{{item.isLead ? '活动线索 · 运营将补齐完整规则' : '完整活动投稿'}}</text>
@@ -13,5 +14,6 @@
       <view class="row-bottom"><text>{{item.dateLabel}} 更新</text><text class="row-link">{{item.status === 'returned' ? '补充投稿' : item.status === 'pending' ? '查看与修改' : '查看详情'}}<text class="chevron" aria-hidden="true">›</text></text></view>
     </button>
   </view>
-  <button wx:if="{{nextCursor}}" class="text-button more-button" bindtap="loadMore" loading="{{loadingMore}}" disabled="{{loadingMore}}">加载更多</button>
+  <view wx:if="{{loadMoreError && !loading}}" class="error more-error" role="alert"><text>{{loadMoreError}}</text><text class="page-description">已读取的投稿仍保留在上方。</text></view>
+  <button wx:if="{{nextCursor && !loading}}" class="text-button more-button" bindtap="loadMore" loading="{{loadingMore}}" disabled="{{loadingMore || !sessionVerified || refreshing}}">{{loadingMore ? '正在读取更多投稿' : loadMoreError ? '重试加载更多' : '加载更多'}}</button>
 </view>

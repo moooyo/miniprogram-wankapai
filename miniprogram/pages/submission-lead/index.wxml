@@ -14,14 +14,19 @@
   <block wx:else>
     <view class="lead-intro">
       <text class="lead-title">{{readOnly ? '线索详情' : submissionId ? '修改活动线索' : '分享活动线索'}}</text>
-      <text class="small-copy">{{readOnly ? '你提供的线索已核实发布，以下保留提交时的内容。' : '先提交你发现的银行活动。无需填写完整日期和金额，运营会补齐规则、核实后再公开。'}}</text>
+      <text class="small-copy">{{readOnly ? '你提供的线索已核实发布，以下保留提交时的内容。' : '银行、名称和一种来源即可，审核后公开。'}}</text>
     </view>
     <view wx:if="{{submitted}}" class="status-notice">
       <text class="notice-title">线索已提交审核</text>
       <text>运营会核实你提供的来源，补齐规则后再公开。</text>
       <button class="text-button" bindtap="viewSubmissions">查看我的投稿</button>
     </view>
-    <view wx:elif="{{submission.status === 'pending'}}" class="status-notice">
+    <view wx:if="{{pendingCreationUnconfirmed && !saving && !submitted}}" class="status-notice" role="status">
+      <text class="notice-title">上次提交结果尚未确认</text>
+      <text>内容暂时锁定。重试会确认原来的提交，确认后可到“我的投稿”继续修改。</text>
+      <button class="text-button" bindtap="viewSubmissions">去我的投稿核对</button>
+    </view>
+    <view wx:if="{{!submitted && submission.status === 'pending'}}" class="status-notice">
       <text class="notice-title">等待运营核实</text>
       <text>线索已进入审核，你仍可以补充来源或更正内容。</text>
     </view>
@@ -33,40 +38,40 @@
       <text class="notice-title">已审核发布</text>
       <button wx:if="{{submission.activityId}}" class="text-button" bindtap="viewActivity">查看公开活动</button>
     </view>
-    <text wx:if="{{!readOnly && !submitted}}" class="draft-status">{{localDraftStatus || (submissionId ? '本次修改自动保存在本机，提交后才会更新审核内容' : '填写内容自动保存在本机，提交前不会进入审核')}}</text>
+    <text wx:if="{{!readOnly && !submitted}}" class="draft-status">{{localDraftStatus || (submissionId ? '修改自动存为本机草稿，提交后更新' : '自动存为本机草稿，提交后进入审核')}}</text>
     <view wx:if="{{error || conflict}}" class="error-banner">
       <text>{{error || '线索已有更新，请读取最新版本。'}}</text>
-      <button wx:if="{{fullSubmission}}" class="text-button" bindtap="viewFullSubmission" disabled="{{saving || uploading || reloading}}">查看完整投稿</button>
-      <button wx:elif="{{conflict}}" class="text-button" bindtap="reloadLatest" loading="{{reloading}}" disabled="{{saving || uploading || reloading}}">{{reloading ? '正在读取' : '读取最新线索'}}</button>
+      <button wx:if="{{fullSubmission}}" class="text-button" bindtap="viewFullSubmission" disabled="{{saving || uploading || reloading || pendingCreationUnconfirmed}}">查看完整投稿</button>
+      <button wx:elif="{{conflict}}" class="text-button" bindtap="reloadLatest" loading="{{reloading}}" disabled="{{saving || uploading || reloading || pendingCreationUnconfirmed}}">{{reloading ? '正在读取' : '读取最新线索'}}</button>
     </view>
 
     <view class="form-section">
       <text class="section-title">活动信息</text>
       <view class="field" id="field-bankId">
         <text class="field-label">所属银行（必填）</text>
-        <picker range="{{bankOptions}}" range-key="name" value="{{bankIndex}}" bindchange="selectBank" disabled="{{readOnly || saving || submitted || reloading}}" aria-label="所属银行">
+        <picker range="{{bankOptions}}" range-key="name" value="{{bankIndex}}" bindchange="selectBank" disabled="{{readOnly || saving || submitted || reloading || pendingCreationUnconfirmed}}" aria-label="所属银行">
           <view class="picker-field {{!lead.bankId ? 'placeholder' : ''}}">{{bankOptions[bankIndex].name}}<text aria-hidden="true">⌄</text></view>
         </picker>
         <text wx:if="{{errors.bankId}}" class="field-error">{{errors.bankId}}</text>
       </view>
       <view class="field" id="field-title">
         <label for="title" class="field-label">活动名称（必填）</label>
-        <input id="title" value="{{lead.title}}" data-field="title" bindinput="input" maxlength="60" placeholder="例如：周末餐饮消费返现" disabled="{{readOnly || saving || submitted || reloading}}" />
+        <input id="title" value="{{lead.title}}" data-field="title" bindinput="input" maxlength="60" placeholder="例如：周末餐饮消费返现" disabled="{{readOnly || saving || submitted || reloading || pendingCreationUnconfirmed}}" />
         <text wx:if="{{errors.title}}" class="field-error">{{errors.title}}</text>
       </view>
     </view>
 
     <view class="form-section">
-      <text class="section-title">规则来源</text>
-      <text class="section-copy">链接、银行 App 路径或规则截图，提供至少一种即可。</text>
+      <text class="section-title">规则来源 · 任选一种</text>
+      <text class="section-copy">提供链接、银行 App 路径或截图，也可同时补充多种来源。</text>
       <view class="field" id="field-sourceUrl">
         <label for="sourceUrl" class="field-label">来源链接</label>
-        <input id="sourceUrl" value="{{lead.sourceUrl}}" data-field="sourceUrl" bindinput="input" maxlength="2048" placeholder="https://，没有链接可以留空" disabled="{{readOnly || saving || submitted || reloading}}" />
+        <input id="sourceUrl" value="{{lead.sourceUrl}}" data-field="sourceUrl" bindinput="input" maxlength="2048" placeholder="https://，没有链接可以留空" disabled="{{readOnly || saving || submitted || reloading || pendingCreationUnconfirmed}}" />
         <text wx:if="{{errors.sourceUrl}}" class="field-error">{{errors.sourceUrl}}</text>
       </view>
       <view class="field" id="field-sourceNote">
         <label for="sourceNote" class="field-label">出处说明或银行 App 路径</label>
-        <textarea id="sourceNote" value="{{lead.sourceNote}}" data-field="sourceNote" bindinput="input" maxlength="500" auto-height placeholder="例如：银行 App → 信用卡 → 优惠活动 → 周末餐饮。也可以补充你看到的活动规则。" disabled="{{readOnly || saving || submitted || reloading}}" />
+        <textarea id="sourceNote" value="{{lead.sourceNote}}" data-field="sourceNote" bindinput="input" maxlength="500" auto-height placeholder="例如：银行 App → 信用卡 → 优惠活动 → 周末餐饮。也可以补充你看到的活动规则。" disabled="{{readOnly || saving || submitted || reloading || pendingCreationUnconfirmed}}" />
         <text wx:if="{{errors.sourceNote}}" class="field-error">{{errors.sourceNote}}</text>
       </view>
       <button wx:if="{{lead.sourceUrl || lead.sourceNote}}" class="copy-button" bindtap="copySource">复制来源内容</button>
@@ -79,20 +84,20 @@
             <text class="image-label">{{item.label}}</text>
             <text class="image-status">{{loadingImages ? '读取中' : '查看'}}</text>
           </button>
-          <button wx:if="{{!readOnly && !submitted}}" class="remove-image" bindtap="removeImage" data-id="{{item.id}}" disabled="{{saving || uploading || reloading}}" aria-label="移除{{item.label}}">移除</button>
+          <button wx:if="{{!readOnly && !submitted}}" class="remove-image" bindtap="removeImage" data-id="{{item.id}}" disabled="{{saving || uploading || reloading || pendingCreationUnconfirmed}}" aria-label="移除{{item.label}}">移除</button>
         </view>
         <text wx:if="{{readOnly && !imageRows.length}}" class="field-hint">未附规则截图</text>
-        <button wx:if="{{!readOnly && !submitted && imageRows.length < 6}}" class="upload-button" bindtap="addImage" loading="{{uploading}}" disabled="{{saving || uploading || reloading}}">{{uploading ? '正在上传截图' : '添加规则截图'}}</button>
+        <button wx:if="{{!readOnly && !submitted && imageRows.length < 6}}" class="upload-button" bindtap="addImage" loading="{{uploading}}" disabled="{{saving || uploading || reloading || pendingCreationUnconfirmed}}">{{uploading ? '正在上传截图' : '添加规则截图'}}</button>
         <text wx:if="{{errors.imageIds}}" class="field-error">{{errors.imageIds}}</text>
         <text wx:if="{{imageError}}" class="field-error">{{imageError}}</text>
         <button wx:if="{{imageError && imageRows.length}}" class="text-button" bindtap="loadImages" disabled="{{loadingImages || uploading}}">重新读取图片</button>
       </view>
     </view>
     <text class="privacy-copy">审核前，线索仅对你与运营可见。发布后不会公开你的卡包、参与记录或收益。</text>
-    <button wx:if="{{!submissionId && !readOnly && !submitted}}" class="full-form-link" bindtap="fillFullRules" disabled="{{saving || uploading || reloading}}">填写完整规则</button>
+    <button wx:if="{{!submissionId && !readOnly && !submitted}}" class="full-form-link" bindtap="fillFullRules" disabled="{{saving || uploading || reloading || pendingCreationUnconfirmed}}">填写完整规则</button>
   </block>
 </view>
 <view wx:if="{{!loading && ready && !readOnly && !denied && !submitted}}" class="lead-dock">
-  <button class="secondary-button" bindtap="saveLocalDraft" disabled="{{saving || uploading || reloading}}">保存草稿</button>
-  <button class="primary-button" bindtap="save" loading="{{saving}}" disabled="{{saving || uploading || reloading || conflict || fullSubmission}}">{{saving ? '正在提交' : submission.status === 'pending' ? '更新线索' : submission.status === 'returned' ? '重新提交线索' : '提交线索'}}</button>
+  <button class="secondary-button" bindtap="saveLocalDraft" disabled="{{saving || uploading || reloading || pendingCreationUnconfirmed}}">保存草稿</button>
+  <button class="primary-button" bindtap="save" loading="{{saving}}" disabled="{{saving || uploading || reloading || conflict || fullSubmission}}">{{saving ? '正在提交' : pendingCreationUnconfirmed ? '重试确认提交' : submission.status === 'pending' ? '更新线索' : submission.status === 'returned' ? '重新提交线索' : '提交线索'}}</button>
 </view>

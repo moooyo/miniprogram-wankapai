@@ -4,7 +4,7 @@ A native WeChat Mini Program implementing the accepted blue-and-white design. It
 
 ## Current delivery
 
-- 16 native pages and 3 reusable components.
+- 19 native pages and 3 reusable components.
 - Native WXML/WXSS/TypeScript source, shared business logic, and two CloudBase functions.
 - A prebuilt `dist/` directory in the downloadable delivery archive, generated and verified on the designated remote environment. Git tracks source only; `dist/` is intentionally ignored.
 - Explicit, persistent demonstration mode with fictional activities. It makes no cloud calls or message deliveries.
@@ -33,6 +33,8 @@ Demonstration records are saved in the developer tool/device's own storage. Uplo
 5. Share an activity lead with a bank, title, and source link, bank-app path, or screenshot. Switch to the demonstration moderator, complete the verified rules, and publish or return it. Unreviewed leads stay private.
 6. Confirm that single-step activities do not show an empty progress meter. Rules, management, and participation history use separate sheets.
 7. Reminder buttons in demonstration mode explain that no WeChat message is sent.
+8. Open Held benefits from Wallet or Mine, check remaining uses and transferability, record or reverse usage, and inspect its retained history.
+9. Search registered airport lounges by airport, code or city. Compare supported banks, advance-booking hours and customer restrictions; missing bank data remains explicitly unregistered.
 
 ## Source layout
 
@@ -60,6 +62,7 @@ Follow [Cloud setup](docs/cloud-setup.md). In particular:
 - Real uploads are verified and copied to server-write-only sealed objects. Editing an original upload cannot alter an approved image.
 - Keep actual reminders disabled until the selected templates, authorization, and delivery have been tested. New-activity reminders use card matching and finite `matches` subscription grants; they are not an unlimited broadcast channel.
 - `webViewEnabled` defaults to `false`. A personal-subject app must use the supported copy-link, Mini Program navigation, or image/path alternatives. Enabling web-view later requires the corresponding platform capability and verified business domains, not merely a client flag.
+- `allowedWebViewHosts` contains exact public hostnames, without schemes, paths, ports, or wildcards. Host matching is case-insensitive. In-app web views accept HTTPS with an omitted port or the default port 443; the latter is removed before loading. Other valid HTTPS ports retain the copy-link fallback.
 - Configure the real privacy declaration and verify the native privacy authorization dialog before publishing.
 
 Personal-subject category suitability for moderated public activity information is still a platform classification question. This project retains the requested workflow; it does not claim that a particular category has been approved or that operator moderation automatically grants category eligibility. Show the real workflow when confirming the category and submitting the app for review.
@@ -77,13 +80,39 @@ npm test
 npm run build
 ```
 
-The delivered build passed TypeScript checking, 62 automated tests, dependency/route/resource checks, and an additional old official WXML/WXSS compiler pass. The latter is a syntax check, not a substitute for current developer tools or physical devices. See [Verification](docs/verification.md) for exact evidence and limits.
+The initial delivered build passed TypeScript checking, 62 automated tests, dependency/route/resource checks, and an additional old official WXML/WXSS compiler pass. These are historical results. The latter is a syntax check, not a substitute for current developer tools or physical devices. See [Verification](docs/verification.md) for that evidence and [the current review loop](docs/ux-review-loop.md) for subsequent changes.
 
 For repeatable simulator acceptance, use `npm run test:ui` after enabling the DevTools CLI/HTTP service port and configuring a local test AppID. This builds the source, opens an isolated demo project, runs scripted interactions and layout assertions, and saves screenshots plus an HTML report under `.qa-native/ui-acceptance/`. It does not use computer-use automation. See [Scripted UI acceptance](docs/ui-acceptance.md) for prerequisites, isolation, and coverage limits. The local-verification authorization rule still applies.
 
 The subsequent [UI/UX remediation](docs/ui-ux-remediation.md) passed 109 automated tests and 22 SDK scenarios. It adds global history access, consistent card and reward identity, actionable bill reminders, guarded draft recovery, clearer validation, and improved visual hierarchy.
 
-The latest [product UX refinement](docs/product-ux-refinement.md) adds benefit-specific recording, prioritized todo actions, lightweight activity leads, readable card names, and preserved form context. All 148 automated tests, type checking, and the source build passed. Its expanded SDK run was interrupted by a closed DevTools connection, so complete UI acceptance of this version remains outstanding.
+The previous [product UX refinement](docs/product-ux-refinement.md) added benefit-specific recording, prioritized todo actions, lightweight activity leads, readable card names, and preserved form context. Its expanded SDK run was interrupted by a closed DevTools connection; that historical result is not current native UI acceptance.
+
+## Complete interactive prototype and review loop
+
+Run `npm run prototype` in the designated remote verification environment to generate `dist/prototype/index.html`. This portable browser prototype includes all 19 source pages, the three shared components, a connected flow overview, every source WXML binding in its operation inventory, and real demo-service interactions. The workbench exposes loading/failure, pagination, and concurrent-edit scenarios. Regenerate it after source changes; do not maintain an independent edited copy. See [Prototype architecture](prototype/README.md).
+
+The [interaction design](docs/interaction-design.md) and [review loop report](docs/ux-review-loop.md) document complete review rounds, source fixes, exact candidate evidence, and the two-consecutive-clean-review exit condition. Verification runs on `ssh test-env` and covers business/controller tests, complete type checking, the production source build, native CommonJS dependency and registration integrity, and browser prototype acceptance at 320, 375, and 768-pixel landscape sizes plus the desktop workbench. The report distinguishes source-binding inventory from operations actually exercised. These checks do not establish current WeChat DevTools, physical-device, or real-cloud acceptance.
+
+The 2026-09-23 review loop closed after round 24: rounds 23 and 24 found no new actionable recommendation against the same frozen source and prototype. The final remote checks passed 720 tests, 175 browser scenarios, and 14 separate reminder integration simulations, along with type checking and the full source build. Exact identities, screenshots, findings, and remaining platform boundaries are recorded in the review loop report.
+
+For browser acceptance, provide an installed Playwright module through `PROTOTYPE_PLAYWRIGHT_MODULE` and an optional Chromium executable through `PROTOTYPE_CHROMIUM_PATH`, then run `npm run test:prototype` remotely after generation. The script writes an HTML report, JSON results, screenshots, contact sheets, the exact prototype snapshot, and its SHA-256 under `.qa-native/prototype/`. It does not add runtime dependencies to the Mini Program.
+
+## Held benefits and airport lounge lookup
+
+Wallet and Mine now open a personal benefit inventory and airport lookup. Record total uses and historical usage for lounge visits, health checks, or other benefits; each subsequent use reduces the remaining balance and can be reversed without deleting its history. Transferability has explicit permission, grey/unverified, and prohibited states. The grey label does not claim official permission.
+
+Airport results search personally registered airport names, three-letter codes, and cities. Each lounge displays its independently registered supported banks, advance-booking hours, card/region/customer restrictions, guest rules, terminal, zone, and source/check date. Airport results provide information; personal usage and remaining balances are managed in Held benefits. Current data is manually maintained; demonstration airports and access rules are fictional.
+
+See [Held benefits](docs/held-benefits.md) for the interaction design, data guarantees, and verification evidence. Run `node scripts/acceptance-entitlements.mjs` in the designated remote environment after building the prototype to exercise the new flows with the same Playwright configuration as the full prototype suite.
+
+The original 2026-09-24 feature candidate passed 762 business/controller tests, complete type checking and source building, 184 full browser regression cases, and 30 held-benefit browser cases. That prototype inventoried 367 source bindings and 243 distinct source handlers across its 19 pages and three shared components; inventory coverage is distinct from automated interaction coverage. The feature report records its historical candidate identities, review rounds, screenshots, and native/cloud integration boundaries.
+
+The feature review loop closed after round 4. Eight concrete findings were corrected in rounds 1 and 2; rounds 3 and 4 independently found no new actionable recommendation on the same frozen revision, satisfying the two-consecutive-clean-review exit condition.
+
+The subsequent [product-wide UX refinement](docs/product-ux-refinement-20260924.md) prioritizes supported-bank lookup, compact personal holdings, stage-specific activity actions, actionable empty rewards, visible reminder saving, and simpler card/account navigation. The earlier feature evidence above remains historical; the refinement report records its own current verification.
+
+This refinement closed after complete reviews 4 and 5 independently found no new actionable recommendation across all 19 pages. Both reviewed the same application source and generated HTML; the report distinguishes a QA-only script correction in the full source manifests. Final remote verification passed 895 business/controller tests, complete type checking and source/prototype builds, native package integrity for 19 pages and 3 components, 199 full browser cases and 31 held-benefit cases. The current prototype inventories 371 source bindings and 244 distinct handlers; the complete browser suite actually exercised 131 distinct handlers. These are browser/demo checks, not current native-device or real-cloud acceptance.
 
 ## Business guarantees
 

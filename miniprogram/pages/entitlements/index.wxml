@@ -1,0 +1,69 @@
+<view class="page entitlements-page">
+  <view class="page-heading">
+    <view><view class="heading">我的权益</view><text class="subtitle">{{scope === 'archived' ? archivedCount + ' 项已归档，使用记录保留' : validCount + ' 项当前可用 · ' + totalCount + ' 项未归档'}}</text></view>
+    <button class="secondary" bindtap="addEntitlement" disabled="{{busy || confirming}}">添加权益</button>
+  </view>
+  <view wx:if="{{status}}" class="notice status-notice" role="status">{{status}}</view>
+  <button class="airport-entry" bindtap="openLounges" disabled="{{busy || confirming}}"><view class="entry-title">机场贵宾厅速查</view><text aria-hidden="true">›</text></button>
+  <view class="filter-panel">
+    <view class="tabs"><button wx:for="{{scopes}}" wx:key="value" class="tab {{scope === item.value ? 'selected' : ''}}" data-value="{{item.value}}" bindtap="changeScope" aria-pressed="{{scope === item.value}}" disabled="{{busy || confirming}}">{{item.label}}</button></view>
+    <label class="field-label" for="entitlement-search">搜索权益名称</label>
+    <input id="entitlement-search" class="input search-input" value="{{search}}" bindinput="changeSearch" placeholder="例如：贵宾厅、年度体检" maxlength="100" disabled="{{busy || confirming}}" confirm-type="search" />
+    <view class="kind-filters"><button wx:for="{{kinds}}" wx:key="value" class="kind-filter {{kind === item.value ? 'selected' : ''}}" data-value="{{item.value}}" bindtap="changeKind" aria-pressed="{{kind === item.value}}" disabled="{{busy || confirming}}">{{item.label}}</button></view>
+    <view wx:if="{{filtered}}" class="filter-summary"><text>已找到 {{rows.length}} 项</text><button class="text-button" bindtap="clearFilters">清除筛选</button></view>
+  </view>
+  <view wx:if="{{refreshing || (outdated && refreshError)}}" class="notice" role="status"><text>{{refreshing ? '正在更新权益，已读取的内容仍然保留…' : refreshError}}</text><button wx:if="{{outdated}}" class="text-button" bindtap="load" disabled="{{busy || confirming}}">重新刷新</button></view>
+  <view wx:if="{{loading}}" class="empty" role="status">正在读取我的权益…</view>
+  <view wx:elif="{{failed}}" class="empty"><view class="empty-title">权益暂时无法加载</view><text>{{refreshError}}</text><button class="secondary" bindtap="load">重新加载</button></view>
+  <block wx:else>
+    <view wx:for="{{rows}}" wx:key="id" class="benefit-card">
+      <view class="benefit-top"><text class="kind-label">{{item.kindLabel}}</text><text class="state-label {{item.usable ? 'available' : ''}}">{{item.status}}</text></view>
+      <view class="benefit-overview"><view class="benefit-identity"><view class="benefit-title">{{item.title}}</view><view wx:if="{{item.cardName || item.provider}}" class="source-line">{{item.cardName || item.provider}}</view><view class="subtitle">已用 {{item.usedUses}} / 共 {{item.totalUses}} 次</view></view><view class="remaining"><text class="remaining-number">{{item.remaining}}</text><text>次剩余</text></view></view>
+      <view class="period">{{item.period}}</view>
+      <view class="transfer-line"><text class="transfer-label {{item.greyTransfer ? 'transfer-grey' : ''}}">{{item.transferLabel}}</text><text wx:if="{{item.greyTransfer}}" class="transfer-caution">需核实，非官方许可</text></view>
+      <button wx:if="{{item.kind === 'lounge' && !item.archived}}" class="lounge-link" data-id="{{item.id}}" bindtap="openLounges">查看 {{item.loungeCount}} 家已登记贵宾厅<text aria-hidden="true">›</text></button>
+      <view class="card-actions"><button wx:if="{{!item.archived}}" class="primary" data-id="{{item.id}}" bindtap="recordUse" disabled="{{!item.usable || loading || refreshing || outdated || busy || confirming || detailLoading}}">{{item.usable ? '记录使用' : item.status}}</button><button wx:else class="primary" data-id="{{item.id}}" bindtap="toggleArchive" disabled="{{loading || refreshing || outdated || busy || confirming || detailLoading}}">恢复权益</button><button class="secondary" data-id="{{item.id}}" bindtap="openHistory" disabled="{{busy || confirming || detailLoading}}">使用记录</button></view>
+      <button class="info-toggle" data-id="{{item.id}}" bindtap="toggleInfo" aria-expanded="{{expandedId === item.id}}" disabled="{{busy || confirming || detailLoading}}"><text>{{expandedId === item.id ? '收起详情' : '详情与管理'}}</text><text aria-hidden="true">{{expandedId === item.id ? '−' : '+'}}</text></button>
+      <view wx:if="{{expandedId === item.id}}" class="benefit-details">
+        <view wx:if="{{item.cardName && item.provider}}" class="source-line">服务提供方 · {{item.provider}}</view>
+        <view wx:if="{{item.transferNote}}" class="benefit-notes">转让说明 · {{item.transferNote}}</view>
+        <view wx:if="{{item.greyTransfer}}" class="qualification">{{greyQualification}}</view>
+        <view wx:if="{{item.notes}}" class="benefit-notes">{{item.notes}}</view>
+        <view wx:if="{{!item.archived}}" class="manage-actions"><button class="text-button" data-id="{{item.id}}" bindtap="editEntitlement" disabled="{{loading || refreshing || outdated || busy || confirming || detailLoading}}">编辑资料与次数</button><button class="text-button" data-id="{{item.id}}" bindtap="toggleArchive" disabled="{{loading || refreshing || outdated || busy || confirming || detailLoading}}">归档权益</button></view>
+        <view wx:else class="subtitle">恢复权益后可编辑资料，原使用记录会保留。</view>
+      </view>
+    </view>
+    <view wx:if="{{!rows.length}}" class="empty">
+      <view class="empty-title">{{filtered ? '没有符合筛选条件的权益' : scope === 'archived' ? '还没有归档权益' : totalCount === 0 ? '把已持有的权益记下来' : '暂时没有当前可用的权益'}}</view>
+      <text>{{filtered ? '可以更换名称、类型，或清除筛选。' : scope === 'archived' ? '归档后，原使用记录与剩余次数仍会保留。' : totalCount === 0 ? '登记贵宾厅、体检等权益，使用后记录扣减次数。' : '可能尚未生效、已经过期，或次数已用完。'}}</text>
+      <button wx:if="{{filtered}}" class="secondary" bindtap="clearFilters">清除筛选</button>
+      <button wx:elif="{{scope === 'valid' && totalCount}}" class="secondary" bindtap="showAll">查看全部权益</button>
+      <button wx:elif="{{scope !== 'archived'}}" class="primary" bindtap="addEntitlement">添加权益</button>
+    </view>
+  </block>
+</view>
+
+<app-sheet show="{{!!sheet}}" title="{{sheet === 'history' ? '使用记录' : '记录使用'}}" dismissible="{{!busy && !confirming && !detailLoading && !pendingUse}}" bind:close="closeSheet" content-state="{{[sheet, selectedRow, usages, detailLoading, detailError, formError, quantityError, dateError, loungeRestriction, pendingUse, status]}}">
+  <view wx:if="{{selectedRow}}" class="sheet-context"><view class="sheet-title">{{selectedRow.title}}</view><view wx:if="{{selectedRow.cardName}}" class="subtitle">{{selectedRow.cardName}}</view><view class="subtitle">{{selectedRow.period}}</view><view class="sheet-balance">剩余 {{selectedRow.remaining}} 次 · {{selectedRow.status}}</view></view>
+  <view wx:if="{{detailLoading}}" class="notice" role="status">正在读取最新记录…</view>
+  <view wx:if="{{outdated}}" class="notice" role="status"><text>权益资料尚未刷新成功，你的填写内容仍然保留。</text><button class="secondary" bindtap="refreshSelected" disabled="{{busy || detailLoading || confirming || pendingUse}}">刷新后继续</button></view>
+  <view wx:if="{{detailError}}" class="error-block" role="alert"><text>{{detailError}}</text><button class="secondary" bindtap="refreshSelected" disabled="{{busy || detailLoading || confirming || pendingUse}}">读取最新记录</button></view>
+  <block wx:if="{{sheet === 'use' && selected && formInitialized}}">
+    <view wx:if="{{selectedRow && !selectedRow.usable}}" class="notice">这项权益当前不可用，暂不能记录新的使用。历史记录仍然保留。</view>
+    <view wx:if="{{selected.kind === 'lounge' && loungeNames.length > 1}}" class="field"><label class="field-label">使用的贵宾厅（选填）</label><picker range="{{loungeNames}}" value="{{loungeIndex}}" bindchange="changeLounge" aria-label="使用的贵宾厅，当前选择：{{loungeNames[loungeIndex]}}" disabled="{{busy || detailLoading || confirming || pendingUse}}"><view class="input picker-input">{{loungeNames[loungeIndex]}}<text aria-hidden="true">⌄</text></view></picker><view wx:if="{{loungeRestriction}}" class="qualification">{{loungeRestriction}}</view><view wx:if="{{loungeCost}}" class="subtitle">登记规则为每次到访扣减 {{loungeCost}} 次；请核实客户资格与预约条件。</view></view>
+    <view class="field"><label class="field-label" for="usage-quantity">本次扣减次数</label><input id="usage-quantity" class="input" type="number" value="{{quantityInput}}" bindinput="changeQuantity" maxlength="9" disabled="{{busy || detailLoading || confirming || pendingUse}}" /><view class="subtitle">最多可记录 {{selectedRow.remaining}} 次</view><view wx:if="{{quantityError}}" class="error" role="alert">{{quantityError}}</view></view>
+    <view class="deduction-preview" role="status"><text>记录后剩余</text><view><text>{{selectedRow.remaining}}</text><text class="preview-arrow" aria-hidden="true">→</text><text class="preview-result {{remainingAfter < 0 ? 'invalid' : ''}}">{{remainingAfter}}</text><text> 次</text></view></view>
+    <view class="field"><label class="field-label">使用日期</label><picker mode="date" value="{{usedOn}}" start="{{selected.startsOn}}" end="{{raw.today < selected.endsOn ? raw.today : selected.endsOn}}" bindchange="changeDate" aria-label="使用日期，当前选择：{{usedOn}}" disabled="{{busy || detailLoading || confirming || pendingUse}}"><view class="input picker-input">{{usedOn}}<text aria-hidden="true">⌄</text></view></picker><view wx:if="{{dateError}}" class="error" role="alert">{{dateError}}</view></view>
+    <view class="field"><label class="field-label" for="usage-note">使用备注（选填）</label><textarea id="usage-note" class="input note-input" value="{{note}}" bindinput="changeNote" maxlength="500" placeholder="例如：本人使用，已完成预约" disabled="{{busy || detailLoading || confirming || pendingUse}}" /></view>
+    <view wx:if="{{formError}}" class="error-block" role="alert">{{formError}}</view>
+    <view class="sheet-actions"><button class="secondary" bindtap="closeSheet" disabled="{{busy || detailLoading || confirming || pendingUse}}">取消</button><button class="primary" bindtap="submitUsage" loading="{{busy}}" disabled="{{busy || detailLoading || confirming || (!pendingUse && (!selectedFresh || outdated || refreshing || !selectedRow.usable))}}">{{pendingUse ? '重试确认本次记录' : busy ? '正在记录' : '确认记录使用'}}</button></view>
+  </block>
+  <block wx:if="{{sheet === 'history'}}">
+    <view wx:if="{{status}}" class="notice" role="status">{{status}}</view>
+    <view wx:if="{{selected && selected.initialUsed}}" class="history-baseline">登记权益时已有 {{selected.initialUsed}} 次使用。这部分不属于下方单笔记录，可在权益编辑页更正。</view>
+    <view wx:if="{{!usages.length && !detailLoading && !detailError}}" class="empty">还没有逐笔登记的使用记录。</view>
+    <view wx:for="{{usages}}" wx:key="id" class="usage-row"><view class="usage-top"><view><view class="usage-date">{{item.usedOn}}</view><view wx:if="{{item.loungeName || selected.kind === 'lounge'}}" class="subtitle">{{item.loungeName || '未指定贵宾厅'}}</view></view><text class="usage-quantity">{{item.quantity}} 次</text></view><view wx:if="{{item.note}}" class="usage-note">{{item.note}}</view><view class="usage-bottom"><text class="subtitle">{{item.reversed ? '已撤销，次数已恢复' : '已计入使用次数'}}</text><button wx:if="{{!item.reversed}}" class="text-button" data-id="{{item.id}}" bindtap="undoUsage" loading="{{busyUsageId === item.id}}" disabled="{{busy || confirming || detailLoading || !selectedFresh || outdated || refreshing}}">撤销记录</button></view></view>
+    <view wx:if="{{formError}}" class="error-block" role="alert">{{formError}}</view>
+    <button class="secondary sheet-close-button" bindtap="closeSheet" disabled="{{busy || confirming || detailLoading}}">关闭</button>
+  </block>
+</app-sheet>

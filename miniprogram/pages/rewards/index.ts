@@ -11,12 +11,13 @@ const currencies: { value: Currency; label: string; name: string }[] = [{ value:
 
 Page({
   data: {
-    loading: true, loadingMore: false, failed: false, tab: 'received', month: '', monthLabel: '', maxDate: '',
+    loading: true, refreshing: false, refreshError: '', outdated: false, loadingMore: false, loadMoreError: '', failed: false, tab: 'received', month: '', monthLabel: '', maxDate: '',
     currencyIndex: 0, currencies, total: '', cashbackTotal: '', discountTotal: '', pendingTotal: '', pendingCount: 0,
     pendingCurrencies: currencies.map((currency, index) => ({ ...currency, index, count: 0 })),
     pending: [] as PendingRow[], received: [] as ReceivedRow[], nextCursor: null as string | null,
   },
   loadVersion: 0,
+  loadedScope: '',
   onShow() {
     const initialTab = wx.getStorageSync('rewards.initialTab');
     if (initialTab === 'pending') { this.setData({ tab: 'pending' }); wx.removeStorageSync('rewards.initialTab'); }
@@ -28,23 +29,44 @@ Page({
   async onPullDownRefresh() { await this.load(); wx.stopPullDownRefresh(); },
   async load() {
     const version = ++this.loadVersion;
-    this.setData({ loading: true, failed: false });
+    const requestedMonth = this.data.month;
+    const currency = currencies[this.data.currencyIndex].value;
+    const keepContent = this.loadedScope === `${requestedMonth}:${currency}`;
+    const windowCount = keepContent ? Math.max(30, this.data.received.length) : 30;
+    this.setData({ loading: !keepContent, refreshing: keepContent, refreshError: '', loadingMore: false, loadMoreError: '', failed: false });
     try {
       const session = await ensureSession();
-      const month = this.data.month || session.month || monthKey();
-      const currency = currencies[this.data.currencyIndex].value;
+      if (version !== this.loadVersion) return;
+      const month = requestedMonth || session.month || monthKey();
       const result = await api.query('rewards.get', { month, currency, limit: 30 });
       if (version !== this.loadVersion) return;
+      const received = new Map(this.mapReceived(result.received, result.cards || [], result.cardIds || {}, result.rewardKinds || {}).map(row => [row.id, row]));
+      let nextCursor = result.nextCursor;
+      const visited = new Set<string>();
+      while (keepContent && nextCursor && received.size < windowCount) {
+        if (visited.has(nextCursor)) throw new Error('Repeated reward page cursor');
+        visited.add(nextCursor);
+        const page = await api.query('rewards.get', { month, currency, cursor: nextCursor, limit: 30 });
+        if (version !== this.loadVersion) return;
+        this.mapReceived(page.received, page.cards || [], page.cardIds || {}, page.rewardKinds || {}).forEach(row => received.set(row.id, row));
+        nextCursor = page.nextCursor;
+      }
       const pendingCounts = result.pendingCounts || { CNY: 0, HKD: 0, MOP: 0 };
       if (!result.pendingCounts) pendingCounts[currency] = result.pending.length;
-      this.setData({ month, monthLabel: `${month.slice(0, 4)} 年 ${Number(month.slice(5))} 月`, maxDate: session.today || today(),
+      this.loadedScope = `${month}:${currency}`;
+      this.setData({ month, outdated: false, monthLabel: `${month.slice(0, 4)} 年 ${Number(month.slice(5))} 月`, maxDate: session.today || today(),
         total: money(result.totalMinor, currency), pendingTotal: money(result.pending.reduce((sum, p) => sum + p.snapshot.rewardMinor, 0), currency),
         cashbackTotal: money(result.cashbackMinor ?? result.totalMinor, currency), discountTotal: money(result.discountMinor ?? 0, currency),
         pendingCount: Object.values(pendingCounts).reduce((sum, count) => sum + count, 0),
         pendingCurrencies: currencies.map((item, index) => ({ ...item, index, count: pendingCounts[item.value] })),
-        pending: this.mapPending(result.pending, result.cards || []), received: this.mapReceived(result.received, result.cards || [], result.cardIds || {}, result.rewardKinds || {}), nextCursor: result.nextCursor });
-    } catch (error) { if (version === this.loadVersion) { this.setData({ failed: true }); showError(error); } }
-    finally { if (version === this.loadVersion) this.setData({ loading: false }); }
+        pending: this.mapPending(result.pending, result.cards || []), received: [...received.values()], nextCursor });
+    } catch (error) {
+      if (version === this.loadVersion) {
+        if (keepContent) this.setData({ outdated: true, refreshError: '收益尚未更新，以下为上次读取的记录。请刷新成功后再确认或更正。' });
+        else { this.setData({ failed: true }); showError(error); }
+      }
+    }
+    finally { if (version === this.loadVersion) this.setData({ loading: false, refreshing: false }); }
   },
   mapPending(items: Participation[], cards: Card[] = []): PendingRow[] {
     const expectedDate = (item: Participation) => item.snapshot.rewardKind === 'discount' ? '9999' : item.expectedOn || '9999';
@@ -74,28 +96,37 @@ Page({
     this.setData({ currencyIndex });
     void this.load();
   },
-  changeMonth(event: WechatMiniprogram.PickerChange) { this.setData({ month: String(event.detail.value).slice(0, 7) }); void this.load(); },
+  changeMonth(event: WechatMiniprogram.PickerChange) {
+    const month = String(event.detail.value).slice(0, 7);
+    this.setData({ month, monthLabel: `${month.slice(0, 4)} 年 ${Number(month.slice(5))} 月` });
+    void this.load();
+  },
   async loadMore() {
-    if (!this.data.nextCursor || this.data.loadingMore || this.data.loading) return;
+    if (!this.data.nextCursor || this.data.loadingMore || this.data.loading || this.data.refreshing || this.data.outdated) return;
     const version = this.loadVersion;
-    this.setData({ loadingMore: true });
+    this.setData({ loadingMore: true, loadMoreError: '' });
     try {
       const result = await api.query('rewards.get', { month: this.data.month, currency: currencies[this.data.currencyIndex].value, cursor: this.data.nextCursor, limit: 30 });
       if (version !== this.loadVersion) return;
       const existing = new Set(this.data.received.map(item => item.id));
       this.setData({ received: this.data.received.concat(this.mapReceived(result.received, result.cards || [], result.cardIds || {}, result.rewardKinds || {}).filter(item => !existing.has(item.id))), nextCursor: result.nextCursor });
-    } catch (error) { showError(error); }
-    finally { this.setData({ loadingMore: false }); }
+    } catch (error) {
+      if (version === this.loadVersion) this.setData({ loadMoreError: '更多收益记录暂时无法加载，已显示的记录仍然保留。' });
+    }
+    finally { if (version === this.loadVersion) this.setData({ loadingMore: false }); }
   },
   confirmPending(event: WechatMiniprogram.TouchEvent) {
+    if (this.data.loading || this.data.refreshing || this.data.outdated || this.data.failed) return;
     const row = this.data.pending.find(item => item.id === event.currentTarget.dataset.id);
     if (row) wx.navigateTo({ url: `/pages/receipt/index?activityId=${encodeURIComponent(row.activityId)}&id=${encodeURIComponent(row.id)}` });
   },
   openPending(event: WechatMiniprogram.TouchEvent) {
+    if (this.data.loading || this.data.refreshing || this.data.outdated || this.data.failed) return;
     const row = this.data.pending.find(item => item.id === event.currentTarget.dataset.id);
     if (row) wx.navigateTo({ url: `/pages/detail/index?id=${encodeURIComponent(row.activityId)}&participationId=${encodeURIComponent(row.id)}` });
   },
   editReceived(event: WechatMiniprogram.TouchEvent) {
+    if (this.data.loading || this.data.refreshing || this.data.outdated || this.data.failed) return;
     const row = this.data.received.find(item => item.id === event.currentTarget.dataset.id);
     if (row) wx.navigateTo({ url: `/pages/receipt/index?id=${encodeURIComponent(row.participationId)}` });
   },

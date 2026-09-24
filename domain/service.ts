@@ -1,5 +1,5 @@
 import {
-  Actor, Activity, ActivityDraft, ActivityItem, ApiRequest, Asset, AuditEvent, Card, Commands,
+  Actor, Activity, ActivityDraft, ActivityItem, ApiRequest, Asset, AuditEvent, Bill, BillingAccount, Card, Commands,
   Detail, MutationResult, Participation, ReminderJob, ReminderPreference, Reward, Submission, Tracking,
 } from '../shared/contracts';
 import { Collection, ServiceOptions, Store } from './store';
@@ -8,10 +8,11 @@ import { DomainError, requireValue } from './errors';
 import { addDays, assertDate, monthOf, periodFor, todayCN } from './calendar';
 import { validateDraft, validateLead } from './validation';
 import { ensureBills, getWallet, removeCard, saveCard, updateBill } from './wallet';
+import { archiveEntitlement, getEntitlement, listEntitlements, saveEntitlement, undoEntitlementUsage, useEntitlement } from './entitlements';
 
 export { DomainError } from './errors';
 
-const queryNames = new Set(['session.get', 'catalog.list', 'activity.get', 'dashboard.get', 'wallet.get', 'rewards.get', 'history.list', 'submissions.list', 'submission.get', 'preferences.get', 'assets.get', 'assets.urls']);
+const queryNames = new Set(['session.get', 'request.replay', 'catalog.list', 'activity.get', 'dashboard.get', 'wallet.get', 'rewards.get', 'history.list', 'submissions.list', 'submission.get', 'preferences.get', 'assets.get', 'assets.urls', 'entitlements.list', 'entitlement.get']);
 const currencies = new Set(['CNY', 'HKD', 'MOP']);
 const ownerWhere = (ownerId: string) => [{ field: 'ownerId', op: 'eq' as const, value: ownerId }];
 const isUnfinished = (record: Participation) => !['completed', 'received', 'skipped'].includes(record.stage);
@@ -83,15 +84,20 @@ async function scopeFor(ctx: Context, activity: Activity, cardId?: string): Prom
   return { scopeKey: 'user', ...(cardId ? { cardId } : {}) };
 }
 
-async function ensureParticipation(ctx: Context, activity: Activity, cardId?: string, on = ctx.today): Promise<Participation> {
+async function ensureParticipation(ctx: Context, activity: Activity, cardId?: string, on = ctx.today, expectNew = false, expectedPeriodKey?: string): Promise<Participation> {
   const period = periodFor(activity, on);
   requireValue(period, 'ACTIVITY_INACTIVE', '该活动不在当前可参与日期内');
   const scope = await scopeFor(ctx, activity, cardId);
+  requireValue(expectedPeriodKey === undefined || expectedPeriodKey === period.periodKey,
+    'VERSION_CONFLICT', '活动所属期已变化，请先核对原期记录', 'expectedPeriodKey');
   const existing = await ctx.store.find<Participation>('participations', { where: [
     ...ownerWhere(ctx.actor.userId), { field: 'activityId', op: 'eq', value: activity.id },
     { field: 'periodKey', op: 'eq', value: period.periodKey }, { field: 'scopeKey', op: 'eq', value: scope.scopeKey },
   ], limit: 1 });
-  if (existing[0]) return existing[0];
+  if (existing[0]) {
+    requireValue(!expectNew, 'VERSION_CONFLICT', '记录已更新，请刷新后重试');
+    return existing[0];
+  }
   const id = `p_${stableId(ctx.actor.userId, activity.id, period.periodKey, scope.scopeKey)}`;
   const collision = await ctx.store.get('participations', id);
   requireValue(!collision, 'CONFLICT', '记录标识发生冲突，请稍后重试');
@@ -106,10 +112,10 @@ async function ensureParticipation(ctx: Context, activity: Activity, cardId?: st
   return record;
 }
 
-async function resolveParticipation(ctx: Context, payload: { participationId?: string; activityId?: string; cardId?: string }): Promise<Participation> {
+async function resolveParticipation(ctx: Context, payload: { participationId?: string; activityId?: string; cardId?: string }, expectNew = false, expectedPeriodKey?: string): Promise<Participation> {
   if (payload.participationId) return ctx.owned<Participation>('participations', payload.participationId);
   requireValue(payload.activityId, 'INVALID_INPUT', '请选择活动');
-  return ensureParticipation(ctx, await currentActivity(ctx, payload.activityId), payload.cardId);
+  return ensureParticipation(ctx, await currentActivity(ctx, payload.activityId), payload.cardId, ctx.today, expectNew, expectedPeriodKey);
 }
 
 async function saveParticipation(ctx: Context, before: Participation, record: Participation, action: string): Promise<MutationResult> {
@@ -193,6 +199,19 @@ async function preferences(ctx: Context): Promise<ReminderPreference> {
 
 async function query(ctx: Context, action: string, payload: Record<string, unknown>, options: ServiceOptions): Promise<unknown> {
   if (action === 'session.get') return { userId: ctx.actor.userId, isModerator: ctx.actor.isModerator, today: ctx.today, month: monthOf(ctx.today), demo: Boolean(options.demo || ctx.actor.demo) };
+  if (action === 'request.replay') {
+    const originalAction = boundedText(payload.action, 'action', 80);
+    requireValue(!queryNames.has(originalAction) && payload.payload && typeof payload.payload === 'object' && !Array.isArray(payload.payload),
+      'INVALID_INPUT', '只能核对已提交操作的完整请求');
+    const requestId = boundedText(payload.requestId, 'requestId', 128);
+    const fingerprint = canonical({ action: originalAction, payload: payload.payload });
+    const id = `q_${stableId(ctx.actor.userId, requestId)}`;
+    const prior = await ctx.store.get<{ ownerId: string; requestId: string; fingerprint: string; result: unknown }>('requests', id);
+    requireValue(prior, 'REQUEST_UNRESOLVED', '暂未查询到原操作的完成结果，请稍后继续核对');
+    requireValue(prior.ownerId === ctx.actor.userId && prior.requestId === requestId && prior.fingerprint === fingerprint,
+      'REQUEST_CONFLICT', '此请求标识已用于不同操作，请核对原请求');
+    return prior.result;
+  }
   if (action === 'preferences.get') return preferences(ctx);
   if (action === 'assets.urls') throw new DomainError('ASSET_URLS_UNAVAILABLE', '图片访问地址服务暂不可用');
   if (action === 'assets.get') {
@@ -215,6 +234,8 @@ async function query(ctx: Context, action: string, payload: Record<string, unkno
     return assets;
   }
   if (action === 'wallet.get') return getWallet(ctx);
+  if (action === 'entitlements.list') return listEntitlements(ctx);
+  if (action === 'entitlement.get') return getEntitlement(ctx, payload.id);
   if (action === 'catalog.list') {
     const { offset, limit } = paging(payload);
     const cards = await cardsFor(ctx);
@@ -229,16 +250,21 @@ async function query(ctx: Context, action: string, payload: Record<string, unkno
   }
   if (action === 'activity.get') {
     let participation: Participation | null = null;
+    const cardId = payload.cardId === undefined ? undefined : boundedText(payload.cardId, 'cardId');
+    if (cardId) await ctx.owned<Card>('cards', cardId);
     if (payload.participationId) {
       participation = await ctx.owned<Participation>('participations', boundedText(payload.participationId, 'participationId'));
       requireValue(!payload.activityId || participation.activityId === payload.activityId, 'NOT_FOUND', '未找到这条活动记录');
+      requireValue(!cardId || participation.snapshot.scope === 'user' || participation.cardId === cardId, 'NOT_FOUND', '未找到这张卡的活动记录');
     }
     const activityId = participation?.activityId || boundedText(payload.activityId, 'activityId');
     const allRecords = await ctx.store.find<Participation>('participations', { where: [...ownerWhere(ctx.actor.userId), { field: 'activityId', op: 'eq', value: activityId }], orderBy: [{ field: 'startsOn', direction: 'desc' }] });
-    if (!participation) participation = allRecords.find(record => record.startsOn <= ctx.today && record.endsOn >= ctx.today) || null;
+    if (!participation) participation = allRecords.find(record => record.startsOn <= ctx.today && record.endsOn >= ctx.today
+      && (!cardId || record.snapshot.scope === 'user' || record.cardId === cardId)) || null;
     let activity = participation?.snapshot || await ctx.store.get<Activity>('activities', activityId);
     requireValue(activity && (participation || (activity.status === 'published' && periodFor(activity, ctx.today))), 'NOT_FOUND', '该活动暂不可用');
-    const tracking = (await ctx.store.find<Tracking>('trackings', { where: [...ownerWhere(ctx.actor.userId), { field: 'activityId', op: 'eq', value: activityId }, ...(participation ? [{ field: 'scopeKey', op: 'eq' as const, value: participation.scopeKey }] : [])], limit: 1 }))[0] || null;
+    const scopeKey = participation?.scopeKey || (cardId ? activity.scope === 'card' ? `card:${cardId}` : 'user' : undefined);
+    const tracking = (await ctx.store.find<Tracking>('trackings', { where: [...ownerWhere(ctx.actor.userId), { field: 'activityId', op: 'eq', value: activityId }, ...(scopeKey ? [{ field: 'scopeKey', op: 'eq' as const, value: scopeKey }] : [])], limit: 1 }))[0] || null;
     const audit = participation ? await ctx.store.find<AuditEvent>('audit_events', { where: [...ownerWhere(ctx.actor.userId), { field: 'entityId', op: 'eq', value: participation.id }], orderBy: [{ field: 'at', direction: 'desc' }], limit: 30 }) : [];
     const assets: Asset[] = [];
     const current = await ctx.store.get<Activity>('activities', activity.id);
@@ -298,6 +324,10 @@ async function query(ctx: Context, action: string, payload: Record<string, unkno
 }
 
 async function command(ctx: Context, action: string, payload: any, options: ServiceOptions): Promise<unknown> {
+  if (action === 'entitlement.save') return saveEntitlement(ctx, payload);
+  if (action === 'entitlement.use') return useEntitlement(ctx, payload);
+  if (action === 'entitlement.undo') return undoEntitlementUsage(ctx, payload);
+  if (action === 'entitlement.archive') return archiveEntitlement(ctx, payload);
   if (action === 'activity.join') {
     const activity = await currentActivity(ctx, payload.activityId);
     const record = await ensureParticipation(ctx, activity, payload.cardId);
@@ -356,7 +386,12 @@ async function command(ctx: Context, action: string, payload: any, options: Serv
     return saveParticipation(ctx, record, { ...record, expectedOn }, 'participation.expected_date');
   }
   if (action === 'reward.confirm') {
-    const record = await resolveParticipation(ctx, payload);
+    requireValue(payload.expectNew === undefined || typeof payload.expectNew === 'boolean', 'INVALID_INPUT', '记录创建条件无效', 'expectNew');
+    requireValue(!payload.expectNew || (payload.participationId === undefined && payload.expectedVersion === undefined), 'INVALID_INPUT', '新建记录不能同时指定已有记录或版本', 'expectNew');
+    requireValue(payload.expectedPeriodKey === undefined || (payload.expectNew === true && typeof payload.expectedPeriodKey === 'string'
+      && /^(?:once|\d{4}(?:-(?:0[1-9]|1[0-2]|Q[1-4]))?)$/.test(payload.expectedPeriodKey) && !payload.expectedPeriodKey.startsWith('0000')),
+      'INVALID_INPUT', '新建记录的所属期无效', 'expectedPeriodKey');
+    const record = await resolveParticipation(ctx, payload, payload.expectNew === true, payload.expectedPeriodKey);
     checkVersion(record, payload.expectedVersion);
     requireValue(Number.isSafeInteger(payload.amountMinor) && payload.amountMinor >= 0 && payload.amountMinor <= 1e11, 'INVALID_INPUT', record.snapshot.rewardKind === 'discount' ? '请填写有效优惠金额' : '请填写有效到账金额', 'amountMinor');
     const receivedOn = assertDate(payload.receivedOn, 'receivedOn');
@@ -389,6 +424,7 @@ async function command(ctx: Context, action: string, payload: any, options: Serv
     requireValue(previous?.status !== 'published', 'IMMUTABLE', '已发布投稿不可修改，请重新提交新的活动线索');
     if (previous) requireValue(Number.isInteger(payload.expectedVersion) && payload.expectedVersion === previous.version, 'VERSION_CONFLICT', '投稿已更新，请刷新后重新编辑');
     const draft = validateDraft(payload.draft, false);
+    if (!previous) requireValue(draft.endsOn >= ctx.today, 'INVALID_INPUT', '活动已经结束，请核实日期后再创建投稿。', 'endsOn');
     await validateAssets(ctx, draft.entrance.imageIds, ctx.actor.userId, false);
     const id = previous?.id || ctx.newId('submission');
     const submission: Submission = { id, ownerId: ctx.actor.userId, draft, ...(previous?.lead ? { lead: previous.lead } : {}), status: 'pending', reviewNote: '', createdAt: previous?.createdAt || ctx.now, updatedAt: ctx.now, version: (previous?.version || 0) + 1 };
@@ -459,8 +495,20 @@ async function command(ctx: Context, action: string, payload: any, options: Serv
     if (payload.kind === 'new_activity') {
       requireValue(payload.entityId === 'matches', 'INVALID_INPUT', '新活动提醒仅适用于我的持卡匹配', 'entityId');
       requireValue((await cardsFor(ctx)).length > 0, 'CARD_REQUIRED', '请先添加至少一张卡片，再订阅匹配活动');
-    } else if (payload.kind === 'repayment') await ctx.owned('bills', payload.entityId);
-    else await ctx.owned('participations', payload.entityId);
+    } else if (payload.kind === 'repayment') {
+      const bill = await ctx.owned<Bill>('bills', payload.entityId);
+      const account = await ctx.owned<BillingAccount>('billing_accounts', bill.billingAccountId);
+      requireValue(account.enabled, 'REMINDER_UNAVAILABLE', '账户已停用，历史账单不再提供微信提醒。');
+      requireValue(!bill.paidAt, 'REMINDER_UNAVAILABLE', '账单已标记还款，无需申请微信提醒。');
+      requireValue(bill.dueOn >= ctx.today, 'REMINDER_UNAVAILABLE', '还款日已过，不再提供这期账单的微信提醒。');
+    } else {
+      const record = await ctx.owned<Participation>('participations', payload.entityId);
+      if (payload.kind === 'deadline') {
+        requireValue(isUnfinished(record) && record.endsOn >= ctx.today, 'REMINDER_UNAVAILABLE', '活动已结束或无需继续参与，不再提供截止提醒。');
+      } else {
+        requireValue(record.stage === 'completed' && record.expectedOn, 'REMINDER_UNAVAILABLE', '仅已完成且设置预计到账日期的记录可申请到账提醒。');
+      }
+    }
     const id = `g_${stableId(ctx.actor.userId, payload.kind, payload.entityId, templateId)}`;
     const previous = await ctx.store.get<{ remaining: number }>('reminder_grants', id);
     await ctx.store.set('reminder_grants', id, { id, ownerId: ctx.actor.userId, kind: payload.kind, entityId: payload.entityId, templateId, remaining: payload.accepted ? (previous?.remaining || 0) + 1 : previous?.remaining || 0, acceptedAt: payload.accepted ? ctx.now : null, updatedAt: ctx.now });
