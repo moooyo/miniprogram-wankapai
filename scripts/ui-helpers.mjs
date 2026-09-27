@@ -14,6 +14,10 @@ const ROOTS = {
   'pages/submissions/index': '.submissions-page',
   'pages/review/index': '.review-page',
   'pages/preferences/index': '.preferences-page',
+  'pages/web-entry/index': '.web-entry-page',
+  'pages/entitlements/index': '.entitlements-page',
+  'pages/entitlement-edit/index': '.entitlement-editor',
+  'pages/lounges/index': '.lounges-page',
 };
 const CONTENT = {
   'pages/todo/index': ['.task-list', '.empty'],
@@ -29,6 +33,11 @@ const CONTENT = {
   'pages/submission-edit/index': ['.editor-intro'],
   'pages/submissions/index': ['.submission-row', '.empty-title'],
   'pages/review/index': ['.review-list', '.empty-title'],
+  'pages/preferences/index': ['.settings-group'],
+  'pages/web-entry/index': ['.entry-state'],
+  'pages/entitlements/index': ['.benefit-card', '.empty'],
+  'pages/entitlement-edit/index': ['#section-basic'],
+  'pages/lounges/index': ['.lounge-card', '.empty'],
 };
 
 const routeName = value => String(value || '').split('?')[0].replace(/^\//, '');

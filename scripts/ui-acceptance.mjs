@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { appendFile, cp, mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { EventEmitter } from 'node:events';
+import { appendFile, cp, mkdir, readFile, readdir, unlink, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import net from 'node:net';
 import path from 'node:path';
@@ -10,6 +12,8 @@ import automator from 'miniprogram-automator';
 import { runUiScenarios } from './ui-scenarios.mjs';
 import { runUiRegressions } from './ui-regressions.mjs';
 import { runUiProductScenarios } from './ui-product-scenarios.mjs';
+import { runUiEntitlementScenarios } from './ui-entitlements-scenarios.mjs';
+import { runUiSettingsScenarios } from './ui-settings-scenarios.mjs';
 import { createPageWaiter, readRenderedViewport } from './ui-helpers.mjs';
 
 const runFile = promisify(execFile);
@@ -19,6 +23,10 @@ const runId = new Date().toISOString().replace(/[:.]/g, '-');
 const output = path.join(root, '.qa-native', 'ui-acceptance', runId);
 const projectPath = path.join(output, 'project');
 const screenshotsPath = path.join(output, 'screenshots');
+const requestedCases = process.env.WECHAT_UI_CASES ? JSON.parse(process.env.WECHAT_UI_CASES) : null;
+assert.ok(requestedCases === null || (Array.isArray(requestedCases) && requestedCases.length > 0
+  && requestedCases.every(value => typeof value === 'string' && value.length > 0)), 'WECHAT_UI_CASES must be a nonempty JSON string array.');
+const selectedCases = requestedCases ? new Set(requestedCases) : null;
 const storageKey = 'card-benefits.native.demo.v1';
 const draftStoragePrefix = 'card-benefits.form-draft.v1:';
 const cliPath = process.env.WECHAT_DEVTOOLS_CLI || (process.platform === 'win32'
@@ -28,7 +36,9 @@ const report = {
   startedAt: new Date().toISOString(),
   approach: 'WeChat CLI and miniprogram-automator; no computer-use automation',
   mode: 'demo',
-  cases: [], screenshots: [], exceptions: [], warnings: [], navigation: [],
+  scope: selectedCases ? 'Focused follow-up with unchanged application identity' : 'Complete native acceptance',
+  requestedCases, skippedCases: [],
+  cases: [], screenshots: [], exceptions: [], warnings: [], navigation: [], protocolDiagnostics: [], screenshotRetries: [],
   limitations: [
     'Simulator acceptance does not verify physical devices or deployed cloud services.',
     'No real account authorization, photo picker, subscription delivery, or publishing is tested.',
@@ -42,6 +52,46 @@ let storageSnapshot;
 let storageBackedUp = false;
 let currentCase;
 let waitForPage;
+let protocolFailure;
+
+async function fingerprint(directory) {
+  const items = [];
+  async function visit(current) {
+    for (const entry of (await readdir(current, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))) {
+      const full = path.join(current, entry.name);
+      if (entry.isDirectory()) await visit(full);
+      else if (entry.isFile()) items.push({ file: path.relative(directory, full).split(path.sep).join('/'),
+        sha256: createHash('sha256').update(await readFile(full)).digest('hex') });
+    }
+  }
+  await visit(directory);
+  return { sha256: createHash('sha256').update(JSON.stringify(items)).digest('hex'), files: items };
+}
+
+function boundProtocol(program) {
+  const send = program.connection.send.bind(program.connection);
+  program.connection.send = async (method, params) => {
+    if (protocolFailure) throw protocolFailure;
+    let timer;
+    try {
+      return await Promise.race([send(method, params), new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          protocolFailure = new Error(`WeChat automation protocol timed out after 30 seconds: ${method}`);
+          reject(protocolFailure);
+        }, 30000);
+      })]);
+    } catch (error) {
+      const details = { method, case: currentCase?.name || 'initialization', at: new Date().toISOString() };
+      for (const key of ['pageId', 'elementId', 'selector', 'path', 'names']) {
+        if (params?.[key] !== undefined) details[key] = params[key];
+      }
+      error.details = { ...error.details, automationMethod: method, ...details };
+      report.protocolDiagnostics.push({ ...details, error: error.message });
+      await appendFile(path.join(output, 'protocol-errors.jsonl'), JSON.stringify({ ...details, error: error.message }) + '\n');
+      throw error;
+    } finally { clearTimeout(timer); }
+  };
+}
 
 const sleep = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
 async function waitUntil(predicate, message, timeoutMs = 10000) {
@@ -82,12 +132,29 @@ async function capture(name) {
   const filename = `${String(report.screenshots.length + 1).padStart(2, '0')}-${safeName}.png`;
   // Wait for the native navigation transition to paint before collecting evidence.
   await sleep(500);
-  await miniProgram.screenshot({ path: path.join(screenshotsPath, filename) });
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      await miniProgram.screenshot({ path: path.join(screenshotsPath, filename) });
+      break;
+    } catch (error) {
+      error.details = { ...error.details, automationStep: 'App.captureScreenshot', screenshotName: name, attempt };
+      if (!/timeout waiting for automator response/i.test(error.message) || attempt === 3) throw error;
+      report.screenshotRetries.push({ name, attempt, error: error.message, at: new Date().toISOString() });
+      console.log(`RETRY screenshot ${name}: attempt ${attempt}`);
+      // Capturing evidence is read-only. Never replay taps, inputs or commands.
+      await sleep(750);
+    }
+  }
   const screenshot = { name, file: `screenshots/${filename}` };
   report.screenshots.push(screenshot);
   currentCase?.screenshots.push(screenshot.file);
 }
 async function check(name, action) {
+  if (selectedCases && !selectedCases.has(name) && name !== 'Native acceptance candidate remains unchanged') {
+    report.skippedCases.push(name);
+    return;
+  }
+  if (protocolFailure) throw protocolFailure;
   const result = { name, status: 'running', screenshots: [], measurements: {} };
   currentCase = result;
   const start = Date.now();
@@ -102,7 +169,10 @@ async function check(name, action) {
     if (error.cause) result.cause = { message: error.cause.message, stack: error.cause.stack };
     result.details = error.details;
     console.error(`FAIL ${name}: ${error.message}`);
-    if (error.details) console.error(JSON.stringify(error.details));
+    if (error.details) console.error(JSON.stringify(error.details.samples ? {
+      expected: error.details.expected, sampleCount: error.details.samples.length,
+      lastSample: error.details.samples.at(-1),
+    } : error.details));
     try { await capture(`failure-${name}`); } catch (captureError) { result.captureError = captureError.message; result.captureStack = captureError.stack; }
   } finally {
     result.durationMs = Date.now() - start;
@@ -110,6 +180,7 @@ async function check(name, action) {
     await appendFile(path.join(output, 'cases.jsonl'), JSON.stringify(result) + '\n');
     currentCase = undefined;
   }
+  if (protocolFailure) throw protocolFailure;
 }
 function record(name, value) {
   if (currentCase) currentCase.measurements[name] = value;
@@ -144,6 +215,7 @@ async function launchProject() {
     try { miniProgram = await automator.connect({ wsEndpoint: `ws://127.0.0.1:${port}` }); return true; }
     catch { return false; }
   }, 'The simulator automation endpoint did not become ready.', 30000);
+  boundProtocol(miniProgram);
   report.automation.status = 'connected';
   await writeFile(path.join(output, 'automation.json'), JSON.stringify(report.automation, null, 2) + '\n');
 }
@@ -157,6 +229,7 @@ async function saveReport() {
     failed: report.cases.filter(result => result.status === 'failed').length,
     runtimeExceptions: report.exceptions.length,
   };
+  report.coverage = { routes: [...new Set(report.navigation.filter(item => item.status === 'ready').map(item => item.expected))].sort() };
   report.status = report.fatal || report.cleanupError || !report.cases.length || report.summary.failed || report.summary.runtimeExceptions ? 'failed' : 'passed';
   await writeFile(path.join(output, 'report.json'), JSON.stringify(report, null, 2) + '\n');
   const caseRows = report.cases.map(result => `<tr><td>${escapeHtml(result.name)}</td><td class="${result.status}">${result.status}</td><td>${escapeHtml(result.error || '')}</td></tr>`).join('');
@@ -177,6 +250,9 @@ try {
   const appid = process.env.WECHAT_TEST_APPID || local.appid;
   assert.match(appid || '', /^wx[0-9a-f]{16}$/, 'A local test AppID is required.');
   await cp(path.join(root, 'dist/miniprogram'), path.join(projectPath, 'miniprogram'), { recursive: true });
+  report.build = await fingerprint(path.join(projectPath, 'miniprogram'));
+  report.source = await fingerprint(path.join(root, 'miniprogram'));
+  await writeFile(path.join(output, 'build-manifest.json'), JSON.stringify(report.build, null, 2) + '\n');
   await writeFile(path.join(projectPath, 'project.config.json'), JSON.stringify({
     ...shared, appid, projectname: `bank-benefits-ui-${runId}`, miniprogramRoot: 'miniprogram/',
     cloudfunctionRoot: undefined,
@@ -194,9 +270,14 @@ try {
     },
   });
   miniProgram.on('exception', error => report.exceptions.push({ message: error.message, stack: error.stack }));
-  miniProgram.on('console', message => {
+  // SDK .on('console') dispatches an unawaited request; await it explicitly so
+  // initialization failures are retained in the report instead of crashing Node.
+  EventEmitter.prototype.on.call(miniProgram, 'console', message => {
     if (['error', 'warn', 'warning'].includes(message.type)) report.warnings.push({ type: message.type, args: message.args });
   });
+  await waitUntil(async () => !!(await miniProgram.currentPage())?.path,
+    'The native app did not finish its initial compilation and launch.', 60000);
+  await miniProgram.connection.send('App.enableLog');
   const info = await miniProgram.evaluate(() => ({ ...wx.getDeviceInfo(), ...wx.getAppBaseInfo() }));
   await miniProgram.switchTab('/pages/todo/index');
   await waitForPage('/pages/todo/index');
@@ -218,6 +299,22 @@ try {
   await runUiScenarios(miniProgram, helpers);
   await runUiRegressions(miniProgram, helpers);
   await runUiProductScenarios(miniProgram, helpers);
+  await runUiSettingsScenarios(miniProgram, helpers);
+  await runUiEntitlementScenarios(miniProgram, helpers);
+  const configuredRoutes = JSON.parse(await readFile(path.join(projectPath, 'miniprogram/app.json'), 'utf8')).pages;
+  const visitedRoutes = new Set(report.navigation.filter(item => item.status === 'ready').map(item => item.expected));
+  await check(selectedCases ? 'Native acceptance candidate remains unchanged' : 'All configured native pages reached a stable rendered state', async () => {
+    if (!selectedCases) {
+      const missing = configuredRoutes.filter(route => !visitedRoutes.has(route));
+      expect(missing.length === 0, 'Some configured native pages were not exercised.', { missing });
+    } else {
+      const executed = new Set(report.cases.map(item => item.name));
+      const missing = [...selectedCases].filter(name => !executed.has(name));
+      expect(missing.length === 0, 'Some requested follow-up cases were not executed.', { missing });
+    }
+    assert.deepEqual(await fingerprint(path.join(root, 'miniprogram')), report.source, 'Application source changed during native acceptance.');
+    assert.deepEqual(await fingerprint(path.join(projectPath, 'miniprogram')), report.build, 'Native build changed during acceptance.');
+  });
 } catch (error) {
   report.fatal = error.stack || error.message;
   console.error(error.message);

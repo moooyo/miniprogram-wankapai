@@ -57,7 +57,7 @@
 </view>
 <view wx:if="{{ready && !loading && !loungeVisible}}" class="editor-dock"><button class="back-button" bindtap="back" disabled="{{saving || reloading}}">返回</button><button class="primary" bindtap="save" loading="{{saving}}" disabled="{{saving || reloading || identityChanged || conflict || saved}}">{{saving ? '正在保存' : pending ? '重试上次保存' : '保存权益'}}</button></view>
 
-<app-sheet show="{{loungeVisible}}" title="{{loungeIndex < 0 ? '添加贵宾厅' : '编辑贵宾厅'}}" dismissible="{{!saving && !reloading}}" bindclose="closeLounge" scroll-into-view="{{loungeScrollTarget}}" content-state="{{[loungeVisible, loungeAdvanced, loungeDraft.reservation, loungeDraft.customerScope, loungeErrorSummary]}}">
+<app-sheet id="lounge-editor-sheet" show="{{loungeVisible}}" title="{{loungeIndex < 0 ? '添加贵宾厅' : '编辑贵宾厅'}}" dismissible="{{!saving && !reloading}}" bindclose="closeLounge" scroll-into-view="{{loungeScrollTarget}}" content-state="{{[loungeVisible, loungeAdvanced, loungeDraft.reservation, loungeDraft.customerScope, loungeErrorSummary]}}">
   <block wx:if="{{loungeDraft}}">
     <text class="sheet-note">确认后加入当前权益，保存权益后生效。</text>
     <view wx:if="{{loungeErrorSummary.length}}" class="validation-summary" role="alert"><text class="validation-title">请检查贵宾厅规则</text><button wx:for="{{loungeErrorSummary}}" wx:key="field" class="validation-link" data-field="{{item.field}}" bindtap="focusLoungeError">{{item.label}}：{{item.message}}</button></view>

@@ -43,7 +43,7 @@
   </block>
 </view>
 
-<app-sheet show="{{!!sheet}}" title="{{sheet === 'history' ? '使用记录' : '记录使用'}}" dismissible="{{!busy && !confirming && !detailLoading && !pendingUse}}" bind:close="closeSheet" content-state="{{[sheet, selectedRow, usages, detailLoading, detailError, formError, quantityError, dateError, loungeRestriction, pendingUse, status]}}">
+<app-sheet id="entitlement-sheet" show="{{!!sheet}}" title="{{sheet === 'history' ? '使用记录' : '记录使用'}}" dismissible="{{!busy && !confirming && !detailLoading && !pendingUse}}" bind:close="closeSheet" content-state="{{[sheet, selectedRow, usages, detailLoading, detailError, formError, quantityError, dateError, loungeRestriction, pendingUse, status]}}">
   <view wx:if="{{selectedRow}}" class="sheet-context"><view class="sheet-title">{{selectedRow.title}}</view><view wx:if="{{selectedRow.cardName}}" class="subtitle">{{selectedRow.cardName}}</view><view class="subtitle">{{selectedRow.period}}</view><view class="sheet-balance">剩余 {{selectedRow.remaining}} 次 · {{selectedRow.status}}</view></view>
   <view wx:if="{{detailLoading}}" class="notice" role="status">正在读取最新记录…</view>
   <view wx:if="{{outdated}}" class="notice" role="status"><text>权益资料尚未刷新成功，你的填写内容仍然保留。</text><button class="secondary" bindtap="refreshSelected" disabled="{{busy || detailLoading || confirming || pendingUse}}">刷新后继续</button></view>

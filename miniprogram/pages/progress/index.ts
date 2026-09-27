@@ -59,13 +59,16 @@ Page({
       catch { cardName = '关联卡片暂时无法读取'; }
     }
     if (this.disposed) return;
+    const recordStatus = stageLabel(participation);
+    const registrationStatus = participation.registeredAt ? '已报名' : '未报名';
+    const latestStatus = recordStatus === registrationStatus ? recordStatus : `${recordStatus} · ${registrationStatus}`;
     this.setData({
       participation, title: activity.title, periodText: periodLabel(participation.periodKey),
-      benefit: benefitCopy(activity.rewardKind), recordStatus: stageLabel(participation),
+      benefit: benefitCopy(activity.rewardKind), recordStatus,
       cardName, target: activity.target, unit: activity.unit,
       showRegistration: activity.requiresRegistration || Boolean(participation.registeredAt) || (preserveInput && (this.data.showRegistration || this.data.registered)),
       editable: !['completed', 'received', 'skipped'].includes(participation.stage),
-      latestSummary: `最新记录：${participation.progress} ${activity.unit} · ${stageLabel(participation)} · ${participation.registeredAt ? '已报名' : '未报名'}`,
+      latestSummary: `最新记录：${participation.progress} ${activity.unit} · ${latestStatus}`,
       ...(preserveInput ? {} : {
         progressInput: String(participation.progress), registered: Boolean(participation.registeredAt),
       }),

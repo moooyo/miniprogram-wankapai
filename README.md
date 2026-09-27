@@ -114,6 +114,8 @@ The subsequent [product-wide UX refinement](docs/product-ux-refinement-20260924.
 
 This refinement closed after complete reviews 4 and 5 independently found no new actionable recommendation across all 19 pages. Both reviewed the same application source and generated HTML; the report distinguishes a QA-only script correction in the full source manifests. Final remote verification passed 895 business/controller tests, complete type checking and source/prototype builds, native package integrity for 19 pages and 3 components, 199 full browser cases and 31 held-benefit cases. The current prototype inventories 371 source bindings and 244 distinct handlers; the complete browser suite actually exercised 131 distinct handlers. These are browser/demo checks, not current native-device or real-cloud acceptance.
 
+The subsequent [2026-09-27 WeChat DevTools acceptance](docs/native-acceptance-20260927.md) used the official CLI and SDK without computer-use automation. Its full native run covered all 19 pages and passed 32 of 35 checks. The three remaining application flows and their prerequisites passed a 10-check focused follow-up on identical source and native build files, with exact SDK callbacks simulating the blocked system-dialog decisions. Both final runs captured zero runtime exceptions and restored their isolated demo storage. Native visual review corrected two duplicated labels; 895 business tests, type checking and source/prototype builds passed again. The report preserves all raw outcomes and the system-dialog, physical-device and live-cloud limits.
+
 ## Business guarantees
 
 - Each period gets a new participation record with a rule snapshot; rollover never clears old progress or pending rewards.

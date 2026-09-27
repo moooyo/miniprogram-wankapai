@@ -1,7 +1,7 @@
 const TEXT = {
   actual: '实际到账', estimate: '原预计', allCurrencies: '全部币种',
   history: '全部参与记录', anotherCard: '用另一张卡参加',
-  addCard: '添加一张卡片', skip: '本期不参加', resume: '恢复本期参与',
+  addCard: '添加符合条件的卡片', skip: '本期不参加', resume: '恢复本期参与',
   demoReminder: '演示提醒', draftTitle: '发现未保存的草稿',
   draftNickname: 'UI draft recovery card', submissionTitle: 'UI draft recovery submission',
 };
@@ -188,7 +188,7 @@ export async function runUiRegressions(miniProgram, helpers) {
     return page;
   }
   async function openAnotherCard(page) {
-    await tap(page, await element(page, '.icon-button'));
+    await tap(page, await element(page, '.detail-more'));
     await (await sheetButton(page, '#detail-manage', '.sheet-option', TEXT.anotherCard)).tap();
     await waitUntil(async () => (await page.data('showCards')) === true, 'Card picker did not open');
   }
@@ -206,7 +206,8 @@ export async function runUiRegressions(miniProgram, helpers) {
   });
   try {
     await mock('showModal', options => {
-      getApp().__uiRegressionPlatformCalls.modals.push({ title: options.title, content: options.content });
+      getApp().__uiRegressionPlatformCalls.modals.push({ title: options.title, content: options.content,
+        confirmText: options.confirmText, cancelText: options.cancelText });
       return { confirm: true, cancel: false, errMsg: 'showModal:ok' };
     });
     await mock('requestSubscribeMessage', options => {
@@ -269,6 +270,9 @@ export async function runUiRegressions(miniProgram, helpers) {
         expect(items.some(item => item.id === 'demo-prior-pending'), 'Previous-period participation is inaccessible');
         expect(new Set(items.filter(item => item.activityId === 'monthly').map(item => item.period)).size >= 2,
           'Monthly history lost its earlier period');
+        await text(history, '.history-scope', '全部活动 · 全部周期');
+        await tap(history, await element(history, '.history-help'));
+        await waitUntil(async () => (await history.data('showRecordHelp')) === true, 'History explanation did not expand');
         await text(history, '.history-description', '全部活动、全部周期');
         await capture('global-history-from-' + origin);
       }
@@ -352,6 +356,21 @@ export async function runUiRegressions(miniProgram, helpers) {
       await text(task.row, '.task-primary', '恢复参与');
       expect((await task.row.$$('.task-primary')).length === 1 && (await task.row.$$('.task-actions button')).length === 2,
         'Skipped row does not present recovery as its single primary action');
+      await tap(page, await element(task.row, '.task-open'));
+      page = await loaded('/pages/detail/index');
+      expect((await page.data('detail.participation.id')) === originalAnnualId
+        && (await page.data('view.primaryAction')) === 'resume', 'Skipped detail points to the wrong recovery action');
+      await text(page, '.detail-primary', '恢复参加');
+      expect((await page.$$('.detail-bottom-bar button')).length === 2, 'Skipped detail has competing primary actions');
+      await tap(page, await element(page, '.detail-more'));
+      await sheetButton(page, '#detail-manage', '.sheet-option', '参与与操作记录');
+      const skippedSheet = await element(page, '#detail-manage');
+      const skippedActions = await Promise.all((await slots(page, skippedSheet, '.option-title')).map(action => action.text()));
+      expect(skippedActions.every(label => !['确认到账', '直接标记完成', '本期不参加'].includes(label.trim())),
+        'Skipped detail exposes an unavailable result action', { skippedActions });
+      await capture('skipped-detail-actions');
+      page = await allTasks();
+      task = await currentTask(page, originalAnnualId);
       await tap(page, await element(task.row, '.more-button'));
       await waitUntil(async () => (await page.data('actionStage')) === 'skipped' && await page.data('showActions'),
         'Skipped participation actions did not open');
@@ -498,9 +517,13 @@ export async function runUiRegressions(miniProgram, helpers) {
     await check('Unsaved receipt restores amount and date without recording income', async () => {
       let page = await editableAnnual();
       const record = await page.data('detail.participation');
-      await tap(page, await button(page, '.detail-bottom-bar button', '确认到账'));
+      await tap(page, await element(page, '.detail-more'));
+      await (await sheetButton(page, '#detail-manage', '.sheet-option', '确认到账')).tap();
       page = await loaded('/pages/receipt/index');
       const date = await page.data('receivedOn');
+      const period = await page.data('periodText');
+      expect(!!period && (await page.data('receiptTarget.periodKey')) === record.periodKey,
+        'Receipt form does not identify the original participation period');
       await (await element(page, '#amount')).input('42.25');
       await waitUntil(async () => (await page.data('amountInput')) === '42.25' && await page.data('dirty'),
         'Receipt input was not received or marked unsaved');
@@ -512,7 +535,16 @@ export async function runUiRegressions(miniProgram, helpers) {
       await renderedValue(page, '#amount', '42.25');
       expect((await page.data('participation.stage')) === record.stage && !(await page.data('participation.receivedOn')),
         'Draft recovery silently recorded income');
-      expect((await platformCalls()).modals.slice(calls).some(modal => modal.title === TEXT.draftTitle), 'Receipt draft recovery skipped confirmation');
+      const recovery = (await platformCalls()).modals.slice(calls).find(modal => modal.title === '恢复活动记录草稿？');
+      expect(!!recovery, 'Receipt draft recovery skipped its period-aware confirmation');
+      expect(recovery.confirmText === '恢复草稿' && recovery.cancelText === '放弃草稿'
+        && recovery.content.includes('草稿归属：' + period) && recovery.content.includes('当前显示：' + period)
+        && recovery.content.includes('恢复只取回金额和日期') && recovery.content.includes('需要另行确认目标再保存'),
+      'Receipt recovery confirmation omits its period or explicit save boundary', { recovery, period });
+      expect((await page.data('receiptTarget.periodKey')) === record.periodKey
+        && (await page.data('receiptTarget.participationId')) === record.id,
+      'Recovered receipt draft changed its original participation target');
+      await helpers.record?.('receipt-draft-confirmation', { recovery, participationId: record.id, periodKey: record.periodKey });
       await text(page, '.entry-primary', '重新应用并保存');
       await capture('receipt-draft-recovered');
       await tab('mine');

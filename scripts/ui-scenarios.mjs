@@ -186,6 +186,41 @@ export async function runUiScenarios(miniProgram, helpers) {
     }
   }
 
+  async function detailActions(page, expected, name) {
+    const primary = await renderedText(page, '.detail-primary', expected.label);
+    expect((await page.data('view.primaryAction')) === expected.action,
+      'Detail does not identify the expected next action', { expected, view: await page.data('view') });
+    const actions = await element(page, '.detail-bottom-bar');
+    const buttons = await actions.$$('button');
+    expect(buttons.length === 2 && (await actions.$$('.detail-primary')).length === 1
+      && (await actions.$$('.detail-more')).length === 1,
+    'Detail must render one primary action and one More control', { count: buttons.length });
+    const more = await renderedText(page, '.detail-more', '更多');
+    const primaryBox = await expectOnScreen(page, primary, 'Detail primary action');
+    const moreBox = await expectOnScreen(page, more, 'Detail More control');
+    expect(primaryBox.width >= 44 && primaryBox.height >= 44 && moreBox.width >= 44 && moreBox.height >= 44
+      && moreBox.right <= primaryBox.x + TOLERANCE && Math.abs(moreBox.y - primaryBox.y) <= TOLERANCE,
+    'Detail action targets overlap or lose their touch area', { primaryBox, moreBox });
+    await capture(name + '-primary');
+    await more.tap();
+    const component = await element(page, '#detail-manage');
+    await element(component, '.sheet-layer');
+    await stableMeasure(await element(component, '.sheet'));
+    let labels = [];
+    await waitUntil(async () => {
+      labels = await Promise.all((await slotElements(page, component, '.option-title')).map(target => target.text()));
+      labels = labels.map(label => label.trim());
+      return expected.present.every(label => labels.includes(label))
+        && expected.absent.every(label => !labels.includes(label));
+    }, 'Detail More actions do not match the current participation stage');
+    expect(!labels.includes(expected.label), 'Detail repeats its primary action in More', { expected, labels });
+    await helpers.record?.(name, { primaryAction: expected.action, primaryLabel: expected.label, primaryBox, moreBox, moreActions: labels });
+    await capture(name + '-more');
+    await (await element(component, '.sheet-close')).tap();
+    await waitUntil(async () => !(await page.data('showManage')) && !(await component.$('.sheet-layer')),
+      'Detail More sheet did not close');
+  }
+
   const tabCases = [
     { name: 'todo', selector: '.heading', text: TEXT.todo },
     { name: 'activities', selector: '.feed-heading .section-title', text: TEXT.activities },
@@ -314,7 +349,8 @@ export async function runUiScenarios(miniProgram, helpers) {
     expect(Math.abs(panelBox.bottom - screen.height) <= TOLERANCE, 'Bank sheet is not anchored to the viewport bottom', { panelBox, screen });
     await renderedText(component, '.sheet-head', TEXT.bankSheet);
     const closeBox = await measure(await element(component, '.sheet-close'));
-    expect(Math.abs(closeBox.width - 44) <= TOLERANCE, 'Sheet close button lost its explicit width', { closeBox });
+    expect(Math.abs(closeBox.width - 48) <= TOLERANCE && Math.abs(closeBox.height - 48) <= TOLERANCE,
+      'Sheet close button lost its explicit touch target', { closeBox });
     const search = await slotElement(page, component, '.bank-search');
     await expectOnScreen(page, search, 'Bank search input');
     const initialChoices = await slotElements(page, component, '.bank-grid-choice');
@@ -341,6 +377,30 @@ export async function runUiScenarios(miniProgram, helpers) {
     const items = await page.data('items');
     expect(items.length > 0, 'Selected bank has no fixture activities');
     await capture('bank-filter-selected');
+  });
+
+  await check('Detail presents the next stage action and keeps secondary actions in More', async () => {
+    await requireDemo();
+    const fixtures = [
+      { id: 'monthly', action: 'progress', label: '更新进度',
+        present: ['直接标记完成', '确认到账', '本期不参加', '参与与操作记录'],
+        absent: ['撤销完成', '撤销到账', '用另一张卡参加'] },
+      { id: 'annual', action: 'complete', label: '标记完成',
+        present: ['确认到账', '用另一张卡参加', '本期不参加', '参与与操作记录'],
+        absent: ['直接标记完成', '撤销完成', '撤销到账'] },
+      { id: 'quarterly', action: 'receipt', label: '确认到账',
+        present: ['预计到账日', '撤销完成', '参与与操作记录'],
+        absent: ['直接标记完成', '本期不参加', '撤销到账'] },
+      { id: 'instant', action: 'join', label: '加入待办',
+        present: ['直接标记完成', '记录已享优惠', '参与与操作记录'],
+        absent: ['预计到账日', '本期不参加', '撤销完成', '撤销优惠记录'] },
+    ];
+    for (const fixture of fixtures) {
+      await tab('activities');
+      await miniProgram.navigateTo('/pages/detail/index?id=' + fixture.id);
+      const page = await loadedPage('/pages/detail/index');
+      await detailActions(page, fixture, 'detail-' + fixture.id);
+    }
   });
 
   await check('Monthly primary action advances from progress to completion to receipt and history', async () => {
@@ -395,6 +455,9 @@ export async function runUiScenarios(miniProgram, helpers) {
     await renderedText(page, '.progress-current', '已到账');
     record = await page.data('detail.participation');
     expect(record.receivedMinor === 1875, 'Receipt has the wrong amount', { receivedMinor: record.receivedMinor });
+    await detailActions(page, { action: 'receipt', label: '修改到账',
+      present: ['撤销到账', '参与与操作记录'], absent: ['直接标记完成', '确认到账', '本期不参加', '撤销完成'] },
+    'detail-received');
     page = await tab('rewards');
     const receivedTab = await buttonByText(page, '.tabs .tab', '已记录');
     await receivedTab.tap();

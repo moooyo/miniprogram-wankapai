@@ -43,6 +43,11 @@ npm run test:ui
 - Todo urgency groups and one primary action per row, including progress-to-completion-to-receipt progression.
 - Instant discounts recorded with savings terminology and separated from cashback subtotals.
 - Lightweight lead submission, private catalog visibility, and rejection of incomplete moderator publication.
+- Stage-specific detail actions and More menus for unjoined, in-progress, completed, received, and skipped participation.
+- Reminder preference persistence, visible fixed Save controls, optional help, and validated/invalid web-entry fallback states.
+- Held-benefit remaining balances and transfer states, normal creation/editing, usage validation and reversal, and archive/restore.
+- Airport lookup by code/city, independently saved supported banks, advance-booking and customer restrictions, and read-only lookup behavior.
+- Stable rendered entry for all 19 configured native pages, checked against the built `app.json` route list.
 
 Assertions inspect actual rendered text and geometry as well as page data. They do not use `setData` to manufacture successful UI states. The role-picker case is explicitly an event-level check; it does not claim to test operating-system picker gestures.
 
@@ -61,14 +66,22 @@ Each run creates `.qa-native/ui-acceptance/<timestamp>/` with:
 - `automation.json`: the isolated project's automation endpoint and lifecycle.
 - `navigation.jsonl`: route agreement, page state, and stable rendered-content diagnostics.
 - `cases.jsonl`: incremental case results and failure stacks, available while a run is active.
+- `build-manifest.json`: per-file SHA-256 identities for the exact native package copied into the isolated project.
+- `protocol-errors.jsonl`, when needed: method-level automation failures with safe page/element identifiers.
 - `project/`: the isolated project copied from the source build.
 
 `.qa-native/ui-acceptance/latest.json` points to the latest report. These artifacts and the test AppID are excluded from Git.
+
+For a focused follow-up, `WECHAT_UI_CASES` accepts a JSON array of exact case names. Include prerequisite cases that create the required records or drafts. The report records selected and skipped cases, checks that every requested case ran, and verifies unchanged application/package identities. A focused report does not claim complete route coverage. The [2026-09-27 native acceptance](native-acceptance-20260927.md) demonstrates the complete-run and focused-follow-up evidence.
+
+Native launch waits for the first compiled page before enabling SDK logging. A bounded protocol timeout preserves diagnostics instead of waiting indefinitely. The SDK can intermittently reject `App.captureScreenshot` after the preceding application assertions have already succeeded; evidence capture retries this read-only operation at most twice and records each retry. Three failed attempts still fail the case. Taps, input, and business submissions are never automatically replayed. The report distinguishes screenshot retries from runtime exceptions and successful application assertions.
 
 Before mutation, the suite requires the demo identity and the monthly fixture's initial progress. The runner backs up the demo data, form-draft keys, and page handoff filters, restores them after testing, verifies the restored values, and closes only its isolated project window. New test drafts are removed without touching unrelated storage. A temporary backup is retained if restoration fails; it is removed after successful restoration. An interrupted Node process may require manual recovery from that backup.
 
 ## Limits
 
 The report records the actual simulator viewport. Passing one size is not a claim about all phones, landscape, large accessibility text, or physical-device behavior. Regression cases mock platform confirmation and leave dialogs; the page state, domain operations, rendered feedback, and draft storage remain real. Real account authorization, photo picking, cloud rules, cross-Mini-Program navigation, and message delivery remain separate integration checks. Controlled controller tests cover delayed responses and version conflicts separately from the SDK flows. The official SDK is a development-only dependency and is never included in the client or cloud-function bundles.
+
+On the current simulator, native modal automation can return without resolving the dialog. The focused lead-recovery and benefit-reversal/archive/restore checks use exact, scoped `showModal` callback simulations instead. Each records its expected and actual dialog arguments and decision, rejects unexpected dialogs, and restores the platform method afterward. These checks verify the application's response and persisted result, not operating-system modal-button gestures.
 
 References: [official automation setup](https://developers.weixin.qq.com/miniprogram/dev/devtools/auto/quick-start.html), [element APIs](https://developers.weixin.qq.com/miniprogram/dev/devtools/auto/element.html).

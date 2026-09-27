@@ -3,6 +3,8 @@ const normalizeRoute = route => String(route || '').replace(/^\//, '');
 
 // These scenarios exercise rendered pages and their normal event handlers.
 // Native picker selections are event-level; no domain response or page data is replaced.
+// The known prior blank lead draft uses a narrowly matched platform-dialog mock
+// because simulator native cancellation did not resolve its recovery promise.
 export async function runUiProductScenarios(miniProgram, helpers) {
   const { check, expect, capture, measure, waitUntil } = helpers;
 
@@ -91,6 +93,93 @@ export async function runUiProductScenarios(miniProgram, helpers) {
       'Product scenarios require an isolated ordinary demo session', { session });
     await text(mine, '.role-picker', '普通用户');
     return mine;
+  }
+
+  async function priorLeadDraft(ownerId) {
+    return miniProgram.evaluate(userId => {
+      const key = ['card-benefits.form-draft.v1', 'submission-lead', userId, 'new'].map(encodeURIComponent).join(':');
+      const saved = wx.getStorageSync(key);
+      if (!saved) return { exists: false };
+      const lead = saved.value?.lead;
+      const fixture = saved.version === 1 && saved.ownerId === userId && saved.entityId === 'new'
+        && saved.baseVersion === null && saved.value?.pendingCreation === undefined && lead
+        && ['title', 'bankId', 'sourceUrl', 'sourceNote'].every(field => lead[field] === '')
+        && Array.isArray(lead.imageIds) && lead.imageIds.length === 0;
+      return { exists: true, fixture: !!fixture, revision: saved.revision || '', updatedAt: saved.updatedAt || '' };
+    }, ownerId);
+  }
+
+  async function freshLead(listPage, ownerId) {
+    const prior = await priorLeadDraft(ownerId);
+    expect(!prior.exists || prior.fixture,
+      'A non-fixture lead draft is present; the product scenario must not discard it', { prior });
+    let page;
+    let contextCreated = false;
+    let modalMockInstalled = false;
+    let observed;
+    try {
+      if (prior.exists) {
+        await miniProgram.evaluate((userId, fixture) => {
+          const app = getApp();
+          if (app.__uiProductLeadRecovery) throw new Error('A prior lead-recovery observer is still active');
+          app.__uiProductLeadRecovery = { ownerId: userId, prior: fixture, calls: [] };
+        }, ownerId, prior);
+        contextCreated = true;
+        modalMockInstalled = true;
+        await miniProgram.mockWxMethod('showModal', options => {
+          const context = getApp().__uiProductLeadRecovery;
+          const pages = getCurrentPages();
+          const current = pages[pages.length - 1];
+          const data = current?.data || {};
+          const key = ['card-benefits.form-draft.v1', 'submission-lead', context.ownerId, 'new'].map(encodeURIComponent).join(':');
+          const saved = wx.getStorageSync(key);
+          const lead = saved?.value?.lead;
+          const call = { title: options.title, content: options.content, confirmText: options.confirmText,
+            cancelText: options.cancelText, route: current?.route || '', ownerId: data.ownerId || '',
+            entityId: data.submissionId || 'new', decision: 'unmatched' };
+          const matches = context.calls.length === 0 && call.route === 'pages/submission-lead/index'
+            && data.ready === true && data.loading === true && data.ownerId === context.ownerId
+            && !data.submissionId && !data.pendingCreationUnconfirmed && !data.dirty
+            && saved?.version === 1 && saved.ownerId === context.ownerId && saved.entityId === 'new'
+            && saved.baseVersion === null && saved.value?.pendingCreation === undefined
+            && (saved.revision || '') === context.prior.revision && (saved.updatedAt || '') === context.prior.updatedAt
+            && lead && ['title', 'bankId', 'sourceUrl', 'sourceNote'].every(field => lead[field] === '')
+            && Array.isArray(lead.imageIds) && lead.imageIds.length === 0
+            && options.title === '发现未保存的草稿' && options.confirmText === '恢复草稿' && options.cancelText === '放弃草稿'
+            && options.content === '是否恢复上次未保存的填写内容？恢复后仍需由你确认保存。';
+          context.calls.push(call);
+          if (!matches) throw new Error('Unexpected modal during the scoped lead-draft decision; no decision was returned');
+          call.decision = 'cancel';
+          return { confirm: false, cancel: true, errMsg: 'showModal:ok' };
+        });
+      }
+      await tap(listPage, await text(listPage, '.new-button', '分享活动'));
+      page = await loaded('/pages/submission-lead/index');
+    } finally {
+      try {
+        if (contextCreated) {
+          observed = await miniProgram.evaluate(() => getApp().__uiProductLeadRecovery);
+          await helpers.record?.('prior-lead-draft-decision', { prior, calls: observed?.calls || [],
+            method: 'SDK mockWxMethod(showModal), exact route, owner, fixture revision and dialog match',
+            limitation: 'Simulator native cancelModal did not resolve this recovery promise in the previous run.' });
+        }
+      } finally {
+        try {
+          if (modalMockInstalled) await miniProgram.restoreWxMethod('showModal');
+        } finally {
+          if (contextCreated) await miniProgram.evaluate(() => { delete getApp().__uiProductLeadRecovery; });
+        }
+      }
+    }
+    if (prior.exists) expect(observed?.calls?.length === 1 && observed.calls[0].decision === 'cancel',
+      'The scoped fixture recovery did not receive exactly one explicit cancellation', { observed });
+    else await helpers.record?.('prior-lead-draft-decision', { prior, decision: 'No prior draft', method: 'No modal action' });
+    const data = await page.data();
+    expect(!data.dirty && !data.pendingCreationUnconfirmed && !data.submissionId
+      && ['title', 'bankId', 'sourceUrl', 'sourceNote'].every(field => data.lead[field] === '')
+      && data.lead.imageIds.length === 0, 'Fresh lead form retained an earlier scenario draft');
+    expect(!(await priorLeadDraft(ownerId)).exists, 'The discarded fixture draft is still offered for recovery');
+    return page;
   }
 
   async function demoRole(mine, moderator) {
@@ -213,12 +302,16 @@ export async function runUiProductScenarios(miniProgram, helpers) {
     page = await loaded('/pages/detail/index');
     expect((await page.data('view.activity.rewardKind')) === 'discount', 'Instant fixture is not a discount');
     expect(!(await page.data('detail.participation')), 'Instant discount already has a demo participation');
-    await tap(page, await text(page, '.join-button', '加入待办'));
+    expect((await page.data('view.primaryAction')) === 'join', 'Unjoined discount does not offer joining as its next action');
+    await tap(page, await text(page, '.detail-primary', '加入待办'));
     await waitUntil(async () => !(await page.data('busy')) && !!(await page.data('detail.participation')),
       'Instant discount did not join the todo list');
     const participationId = await page.data('detail.participation.id');
     await text(page, '.progress-heading', '我的参与');
-    await tap(page, await button(page, '.detail-bottom-bar button', '记录已享优惠'));
+    expect((await page.data('view.primaryAction')) === 'receipt'
+      && (await page.$$('.detail-bottom-bar button')).length === 2,
+    'Joined discount does not present one receipt action and More');
+    await tap(page, await text(page, '.detail-primary', '记录已享优惠'));
     page = await loaded('/pages/receipt/index');
     expect(await page.data('allowed'), 'Discount receipt form is not available');
     await text(page, '#amount-field .entry-label', '实际优惠');
@@ -237,6 +330,7 @@ export async function runUiProductScenarios(miniProgram, helpers) {
       'Discount has the wrong recorded amount');
     await text(page, '.progress-current', '已享优惠');
     await text(page, '.summary-reward', '实际优惠');
+    await text(page, '.detail-primary', '修改优惠');
     page = await rewards(month);
     const recorded = await row(page, '.ledger-row', 'received', item => item.participationId === participationId, '周末餐饮');
     await text(recorded.target, '.ledger-kind', '已享优惠');
@@ -256,10 +350,10 @@ export async function runUiProductScenarios(miniProgram, helpers) {
     const title = '界面验收活动线索 ' + Date.now();
     const sourceNote = '银行 App → 信用卡 → 优惠活动。仅用于隔离演示验收，等待运营核实。';
     let mine = await ordinaryDemo();
+    const ownerId = (await mine.data('session')).userId;
     await tap(mine, await button(mine, '.menu-row', '我的投稿'));
     let page = await loaded('/pages/submissions/index');
-    await tap(page, await text(page, '.new-button', '分享活动'));
-    page = await loaded('/pages/submission-lead/index');
+    page = await freshLead(page, ownerId);
     expect(await page.data('ready'), 'Lead form did not initialize');
     const bankIndex = (await page.data('bankOptions')).findIndex(bank => bank.id === 'cmb');
     expect(bankIndex > 0, 'Lead form is missing the fixture bank');
