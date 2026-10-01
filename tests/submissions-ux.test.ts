@@ -6,6 +6,9 @@ import vm from 'node:vm';
 import ts from 'typescript';
 import * as catalog from '../shared/catalog';
 import * as validation from '../domain/validation';
+import * as activityCycle from '../shared/activity-cycle';
+import * as recognitionForm from '../miniprogram/services/recognition-form';
+import * as reviewForm from '../miniprogram/services/review-form';
 import type { ActivityDraft, Submission, SubmissionStatus } from '../shared/contracts';
 
 type Controller = { data: Record<string, any>; setData(values: Record<string, unknown>, callback?: () => void): void; [key: string]: any };
@@ -77,6 +80,9 @@ function harness(route: 'review' | 'submission-edit' | 'submission-lead' | 'subm
     '../../services/api': { api, ensureSession: async () => ({ userId: options.ownerId || 'user-1', today: '2026-09-21', isModerator: true, demo: true }) },
     '../../../shared/catalog': catalog,
     '../../../domain/validation': validation,
+    '../../../shared/activity-cycle': activityCycle,
+    '../../services/recognition-form': recognitionForm,
+    '../../services/review-form': reviewForm,
     '../../services/form-draft': drafts,
     '../../services/navigation': { navigateBackOr: () => { effects.push('navigateBack'); } },
   });

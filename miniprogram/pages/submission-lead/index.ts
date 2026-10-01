@@ -1,8 +1,10 @@
 import { api, ensureSession, uploadImage, previewAssets } from '../../services/api';
-import type { ActivityLead, Asset, Submission } from '../../../shared/contracts';
+import type { ActivityDraft, ActivityLead, Asset, Submission } from '../../../shared/contracts';
 import { banks } from '../../../shared/catalog';
 import { validatePublicHttps } from '../../../domain/validation';
 import { loadDraft, saveDraft, removeDraft, getDraftRevision, confirmDraftRecovery, createCommandIntent } from '../../services/form-draft';
+import { cleanRewardInput, cycleOptions, cyclePreview, defaultCycle, intervalOptions, mergeRecognition, recognitionLabels, rewardOptions, rewardUnit, rewardValue, weekdayOptions } from '../../services/recognition-form';
+import type { DateRecognitionMarks, RecognitionMarks, RecognizedImage } from '../../services/recognition-form';
 
 type LeadField = keyof ActivityLead;
 type InputEvent = { currentTarget: { dataset: { field?: string; id?: string } }; detail: { value: string } };
@@ -10,7 +12,7 @@ type PendingLeadCreation = { pending: true; intentKey: string; lead: ActivityLea
 type SavedLeadInput = { lead: ActivityLead; intentKey?: string; pendingCreation?: PendingLeadCreation };
 type DraftContext = { ownerId: string; entityId: string; revision: string | null; generation: number };
 const draftScope = 'submission-lead';
-const leadFields: LeadField[] = ['title', 'bankId', 'sourceUrl', 'sourceNote', 'imageIds'];
+const leadFields: LeadField[] = ['title', 'bankId', 'sourceUrl', 'sourceNote', 'imageIds', 'rules'];
 const rejectedCreationCodes = new Set(['INVALID_INPUT', 'INVALID_DATE', 'INVALID_ASSET', 'NOT_FOUND', 'CONFLICT', 'FORBIDDEN', 'IMMUTABLE', 'REQUEST_CONFLICT', 'VERSION_CONFLICT', 'INVALID_STATE', 'INVALID_ACTION']);
 
 function freshLead(bankId = ''): ActivityLead {
@@ -43,8 +45,11 @@ Page({
   imageGeneration: 0,
   previewSequence: 0,
   creationIntentKey: '',
+  initialTitle: '',
   pendingCreation: null as PendingLeadCreation | null,
   draftBaseVersion: null as number | null,
+  recognitionGeneration: 0,
+  recognitionSnapshot: null as ActivityLead | null,
   data: {
     loading: true, ready: false, saving: false, submitted: false, pendingCreationUnconfirmed: false, reloading: false, uploading: false, loadingImages: false,
     denied: false, readOnly: false, fullSubmission: false, conflict: false, dirty: false, error: '', imageError: '', localDraftStatus: '',
@@ -52,15 +57,24 @@ Page({
     lead: freshLead(), errors: {} as Partial<Record<LeadField, string>>,
     bankOptions: [{ id: '', name: '请选择银行' }, ...banks], bankIndex: 0,
     assets: [] as Asset[], assetUrls: [] as { id: string; url: string }[],
-    imageRows: [] as { id: string; label: string; url: string }[],
+    imageRows: [] as { id: string; label: string; url: string; recognized: boolean; scanning: boolean }[],
+    today: '', bankGridOpen: false, selectedBank: null as typeof banks[number] | null, bankGrid: banks,
+    rulesExpanded: false, rules: {} as Partial<ActivityDraft>, rewardText: '', rewardOptions, cycleOptions, weekdayOptions, intervalOptions,
+    cycleType: '', cycleDay: 1, cycleWeekday: 1, cycleN: 1, cycleUnit: 'month', intervalLabel: '个月', cyclePreview: '', rewardUnit: '元', ruleError: '',
+    recognizing: false, recognitionDemo: false, recognizedImages: [] as RecognizedImage[], recognizedFields: {} as RecognitionMarks, recognizedDates: {} as DateRecognitionMarks,
+    recognitionChips: [] as { id: string; label: string }[], recognitionCount: 0, pendingRecognitionCount: 0, suggestedTitle: '',
+    viewerShow: false, viewerIndex: 0, viewerItems: [] as Record<string, unknown>[],
   },
-  onLoad(options: { id?: string; bankId?: string }) {
+  onLoad(options: { id?: string; bankId?: string; title?: string }) {
     this.creationIntentKey = createCommandIntent();
-    this.setData({ submissionId: options.id || '', lead: freshLead(banks.some(bank => bank.id === options.bankId) ? options.bankId : '') });
+    const lead = freshLead(banks.some(bank => bank.id === options.bankId) ? options.bankId : '');
+    this.initialTitle = !options.id && options.title ? options.title.slice(0, 60) : '';
+    lead.title = this.initialTitle;
+    this.setData({ submissionId: options.id || '', lead });
     void this.load();
   },
   onHide() { this.previewSequence++; if (!this.disposed && !this.data.saving && !this.data.reloading) this.persistDraft(); },
-  onUnload() { this.disposed = true; this.loadGeneration++; this.imageGeneration++; },
+  onUnload() { this.disposed = true; this.loadGeneration++; this.imageGeneration++; this.recognitionGeneration++; },
   async load() {
     if (this.disposed || this.data.saving || this.data.submitted || this.data.reloading || this.data.uploading) return;
     if (!this.creationIntentKey) this.creationIntentKey = createCommandIntent();
@@ -70,6 +84,7 @@ Page({
     try {
       const session = await ensureSession();
       if (this.disposed || generation !== this.loadGeneration) return;
+      this.setData({ today: session.today });
       const submission = this.data.submissionId ? await api.query('submission.get', { id: this.data.submissionId }) : null;
       if (this.disposed || generation !== this.loadGeneration) return;
       if (submission && submission.ownerId !== session.userId) { this.setData({ denied: true }); return; }
@@ -99,7 +114,7 @@ Page({
           }
           const stale = saved.baseVersion !== this.draftBaseVersion;
           this.draftBaseVersion = typeof saved.baseVersion === 'number' ? saved.baseVersion : null;
-          this.setData({ lead: saved.value.lead, dirty: true, conflict: stale, localDraftStatus: '已恢复本机草稿，尚未提交', error: stale ? '草稿基于旧版本，暂不能提交。请先复制需要保留的内容，再读取最新线索核对。' : '' });
+          this.setData({ lead: saved.value.lead, rewardText: saved.value.lead.rules?.rewardMinor ? String(saved.value.lead.rules.rewardMinor / 100) : '', rulesExpanded: !!saved.value.lead.rules, dirty: true, conflict: stale, localDraftStatus: '已恢复本机草稿，尚未提交', error: stale ? '草稿基于旧版本，暂不能提交。请先复制需要保留的内容，再读取最新线索核对。' : '' });
           if (this.pendingCreation) this.persistDraft();
           wx.enableAlertBeforeUnload({ message: '草稿已保存在本机，尚未提交。' });
         } else if (saved) {
@@ -118,17 +133,28 @@ Page({
   applyLead(submission: Submission | null, ownerId: string) {
     this.pendingCreation = null;
     this.setData({ pendingCreationUnconfirmed: false });
-    const lead = submission?.lead ? JSON.parse(JSON.stringify(submission.lead)) as ActivityLead : freshLead(this.data.lead.bankId);
+    const lead = submission?.lead ? JSON.parse(JSON.stringify(submission.lead)) as ActivityLead : { ...freshLead(this.data.lead.bankId), title: this.initialTitle };
     const readOnly = submission?.status === 'published';
     this.draftBaseVersion = submission?.version ?? null;
-    this.setData({ ready: true, ownerId, submission, lead, readOnly, fullSubmission: false, conflict: false, dirty: false, errors: {}, error: '', imageError: '', localDraftStatus: '', assets: [], assetUrls: [] });
+    this.recognitionSnapshot = null;
+    this.recognitionGeneration++;
+    this.setData({ ready: true, ownerId, submission, lead, readOnly, fullSubmission: false, conflict: false, dirty: false, errors: {}, error: '', imageError: '', localDraftStatus: '', assets: [], assetUrls: [], recognizedImages: [], recognizedFields: {}, recognizedDates: {}, recognizing: false, suggestedTitle: '', rulesExpanded: !!lead.rules, rewardText: lead.rules?.rewardMinor ? String(lead.rules.rewardMinor / 100) : '', ruleError: '', viewerShow: false });
     this.syncOptions();
     wx.setNavigationBarTitle({ title: readOnly ? '线索详情' : submission ? '修改活动线索' : '分享活动线索' });
   },
   syncOptions() {
+    const rules = this.data.lead.rules || {};
+    const cycle = rules.cycle;
+    const recognizedFields = this.data.recognizedFields;
+    const chips = Object.keys(recognitionLabels).filter(key => recognizedFields[key as keyof RecognitionMarks]).map(id => ({ id, label: recognitionLabels[id as keyof RecognitionMarks] }));
     this.setData({
       bankIndex: Math.max(0, this.data.bankOptions.findIndex(bank => bank.id === this.data.lead.bankId)),
-      imageRows: this.data.lead.imageIds.map((id, index) => ({ id, label: `规则截图 ${index + 1}`, url: this.data.assetUrls.find(asset => asset.id === id)?.url || '' })),
+      selectedBank: banks.find(bank => bank.id === this.data.lead.bankId) || null,
+      rules, cycleType: cycle?.t || '', cycleDay: cycle?.t === 'month' ? cycle.day : 1, cycleWeekday: cycle?.t === 'week' ? cycle.weekday : 1,
+      cycleN: cycle?.t === 'custom' ? cycle.n : 1, cycleUnit: cycle?.t === 'custom' ? cycle.unit : 'month', intervalLabel: cycle?.t === 'custom' ? intervalOptions.find(unit => unit.id === cycle.unit)?.name || '个月' : '个月',
+      cyclePreview: cyclePreview(cycle, this.data.today), rewardUnit: rewardUnit(rules), recognitionChips: chips, recognitionCount: chips.length,
+      pendingRecognitionCount: this.data.lead.imageIds.filter(id => !this.data.recognizedImages.some(item => item.assetId === id)).length,
+      imageRows: this.data.lead.imageIds.map((id, index) => ({ id, label: `活动截图 ${index + 1}`, url: this.data.assetUrls.find(asset => asset.id === id)?.url || '', recognized: this.data.recognizedImages.some(item => item.assetId === id && item.recognized), scanning: this.data.recognizing && !this.data.recognizedImages.some(item => item.assetId === id) })),
     });
   },
   draftEntityId(): string { return this.data.submissionId || 'new'; },
@@ -161,18 +187,147 @@ Page({
     const field = event.currentTarget.dataset.field;
     if (!field || !['title', 'sourceUrl', 'sourceNote'].includes(field)) return;
     this.setData({ [`lead.${field}`]: String(event.detail.value), [`errors.${field}`]: '', ...(this.data.conflict ? {} : { error: '' }) });
+    if (field === 'title') this.setData({ 'recognizedFields.title': false, suggestedTitle: '' });
+    if (field === 'sourceNote') this.setData({ 'recognizedFields.entrance': false, ...(this.data.lead.rules?.entrance ? { 'lead.rules.entrance.instructions': String(event.detail.value) } : {}) });
     if (field === 'sourceUrl' || field === 'sourceNote') this.setData({ 'errors.sourceNote': '' });
     this.markDirty();
   },
   selectBank(event: InputEvent) {
     if (!this.canEdit()) return;
-    const bank = this.data.bankOptions[Number(event.detail.value)];
+    const bank = event.currentTarget.dataset.id ? banks.find(item => item.id === event.currentTarget.dataset.id) : this.data.bankOptions[Number(event.detail.value)];
     if (!bank) return;
-    this.setData({ 'lead.bankId': bank.id, 'errors.bankId': '', ...(this.data.conflict ? {} : { error: '' }) });
+    this.setData({ 'lead.bankId': bank.id, ...(this.data.lead.rules ? { 'lead.rules.currency': bank.id === 'hsbc' ? 'HKD' : 'CNY' } : {}), 'errors.bankId': '', ...(this.data.conflict ? {} : { error: '' }) });
+    this.setData({ 'recognizedFields.bankId': false, bankGridOpen: false });
     this.markDirty();
   },
+  openBanks() { if (this.canEdit()) this.setData({ bankGridOpen: true }); },
+  toggleRules() { this.setData({ rulesExpanded: !this.data.rulesExpanded }); },
+  inputRule(event: InputEvent) {
+    if (!this.canEdit()) return;
+    const field = event.currentTarget.dataset.field;
+    if (field === 'rewardText') {
+      const value = cleanRewardInput(String(event.detail.value), this.data.rules.rewardKind === 'points');
+      this.setData({ rewardText: value, 'lead.rules.rewardMinor': rewardValue(value, this.data.rules.rewardKind === 'points') || 0, 'recognizedFields.reward': false });
+    } else if (field === 'conditions') this.setData({ 'lead.rules.conditions': String(event.detail.value), 'recognizedFields.conditions': false });
+    else return;
+    this.setData({ ruleError: '', 'errors.rules': '', ...(this.data.conflict ? {} : { error: '' }) });
+    this.markDirty();
+  },
+  selectReward(event: { currentTarget: { dataset: { id: string } } }) {
+    if (!this.canEdit()) return;
+    const kind = event.currentTarget.dataset.id;
+    if (!rewardOptions.some(item => item.id === kind)) return;
+    const value = cleanRewardInput(this.data.rewardText, kind === 'points');
+    this.setData({ 'lead.rules.rewardKind': kind, 'lead.rules.rewardMinor': rewardValue(value, kind === 'points') || 0, 'lead.rules.currency': this.data.rules.currency || (this.data.lead.bankId === 'hsbc' ? 'HKD' : 'CNY'), rewardText: value, 'recognizedFields.reward': false, ruleError: '', 'errors.rules': '', ...(this.data.conflict ? {} : { error: '' }) });
+    this.markDirty();
+  },
+  selectCycle(event: { currentTarget: { dataset: { id: string } } }) {
+    if (!this.canEdit()) return;
+    const type = event.currentTarget.dataset.id;
+    if (!cycleOptions.some(item => item.id === type)) return;
+    this.setData({ 'lead.rules.cycle': defaultCycle(type, this.data.rules.startsOn || '', this.data.rules.endsOn || ''), 'recognizedFields.cycle': false, ruleError: '', 'errors.rules': '', ...(this.data.conflict ? {} : { error: '' }) });
+    this.markDirty();
+  },
+  selectWeekday(event: { currentTarget: { dataset: { id: number } } }) {
+    if (!this.canEdit() || this.data.rules.cycle?.t !== 'week') return;
+    const weekday = Number(event.currentTarget.dataset.id);
+    if (!weekdayOptions.some(item => item.id === weekday)) return;
+    this.setData({ 'lead.rules.cycle.weekday': weekday, 'recognizedFields.cycle': false, 'errors.rules': '' });
+    this.markDirty();
+  },
+  stepCycle(event: { currentTarget: { dataset: { delta: number } } }) {
+    if (!this.canEdit()) return;
+    const cycle = this.data.rules.cycle;
+    const delta = Number(event.currentTarget.dataset.delta);
+    if (cycle?.t === 'month') this.setData({ 'lead.rules.cycle.day': Math.max(1, Math.min(28, cycle.day + delta)) });
+    else if (cycle?.t === 'custom') this.setData({ 'lead.rules.cycle.n': Math.max(1, Math.min(cycle.unit === 'day' ? 90 : 12, cycle.n + delta)) });
+    else return;
+    this.setData({ 'recognizedFields.cycle': false, 'errors.rules': '' }); this.markDirty();
+  },
+  selectInterval(event: { currentTarget: { dataset: { id: string } } }) {
+    if (!this.canEdit() || this.data.rules.cycle?.t !== 'custom') return;
+    const unit = event.currentTarget.dataset.id;
+    if (!intervalOptions.some(item => item.id === unit)) return;
+    this.setData({ 'lead.rules.cycle.unit': unit, 'lead.rules.cycle.n': Math.min(unit === 'day' ? 90 : 12, this.data.rules.cycle.n), 'recognizedFields.cycle': false, 'errors.rules': '' });
+    this.markDirty();
+  },
+  selectRuleDate(event: InputEvent) {
+    if (!this.canEdit()) return;
+    const field = event.currentTarget.dataset.field;
+    const value = String(event.detail.value);
+    if (!['startsOn', 'endsOn'].includes(field || '')) return;
+    if (field === 'endsOn' && this.data.rules.startsOn && value < this.data.rules.startsOn) { wx.showToast({ title: '结束日期不能早于开始日期', icon: 'none' }); return; }
+    this.setData({ [`lead.rules.${field}`]: value, [`recognizedDates.${field}`]: false, 'recognizedFields.time': false, ruleError: '', 'errors.rules': '', ...(this.data.conflict ? {} : { error: '' }) });
+    if (field === 'startsOn' && this.data.rules.endsOn && value > this.data.rules.endsOn) this.setData({ 'lead.rules.endsOn': '', 'recognizedDates.endsOn': false });
+    const cycle = this.data.lead.rules?.cycle;
+    if (cycle?.t === 'once') this.setData({ 'lead.rules.cycle.start': this.data.lead.rules?.startsOn || '', 'lead.rules.cycle.end': this.data.lead.rules?.endsOn || '' });
+    if (cycle?.t === 'custom') this.setData({ 'lead.rules.cycle.anchor': this.data.lead.rules?.startsOn || '' });
+    this.markDirty();
+  },
+  async recognizeImages() {
+    if (!this.canEdit() || this.data.recognizing || this.data.uploading) return;
+    const ids = this.data.lead.imageIds.filter(id => !this.data.recognizedImages.some(item => item.assetId === id));
+    if (!ids.length) return;
+    const generation = ++this.recognitionGeneration;
+    const loadGeneration = this.loadGeneration;
+    if (!this.recognitionSnapshot) this.recognitionSnapshot = JSON.parse(JSON.stringify(this.data.lead)) as ActivityLead;
+    this.setData({ recognizing: true, imageError: '' }); this.syncOptions();
+    try {
+      const response = await api.query('assets.recognize', { ids });
+      if (this.disposed || generation !== this.recognitionGeneration || loadGeneration !== this.loadGeneration || !this.canEdit()) return;
+      let current: Partial<ActivityDraft> = { ...this.data.lead.rules, title: this.data.lead.title, bankId: this.data.lead.bankId, entrance: this.data.lead.rules?.entrance || { kind: 'guide', label: '参与入口', instructions: this.data.lead.sourceNote, imageIds: [] } };
+      let marks = this.data.recognizedFields;
+      let dateMarks = this.data.recognizedDates;
+      const syncEntryNote = !this.data.lead.sourceNote || !!this.data.recognizedFields.entrance;
+      let suggestion = this.data.suggestedTitle;
+      const images: RecognizedImage[] = [];
+      for (const item of response.items) {
+        if (!ids.includes(item.assetId)) continue;
+        const fields = { ...item.fields };
+        if (this.data.rewardText.trim() && !this.data.recognizedFields.reward) { delete fields.rewardKind; delete fields.rewardMinor; }
+        const merged = mergeRecognition(current, fields, marks, dateMarks);
+        current = merged.value; marks = merged.marks; dateMarks = merged.dateMarks;
+        if (merged.suggestion) suggestion = merged.suggestion;
+        images.push({ assetId: item.assetId, recognized: item.recognized, regions: item.regions });
+      }
+      const { title, bankId, ...rules } = current;
+      this.setData({ 'lead.title': title || '', 'lead.bankId': bankId || '', 'lead.rules': rules, ...(syncEntryNote && rules.entrance?.instructions ? { 'lead.sourceNote': rules.entrance.instructions } : {}), rewardText: rules.rewardMinor ? String(rules.rewardMinor / 100) : this.data.rewardText, recognizedFields: marks, recognizedDates: dateMarks, recognizedImages: [...this.data.recognizedImages, ...images], suggestedTitle: suggestion, recognitionDemo: response.demo, bankGridOpen: false, rulesExpanded: this.data.rulesExpanded || !!(marks.reward || marks.cycle || marks.time || marks.conditions) });
+      this.markDirty();
+      if (!images.some(item => item.recognized)) wx.showToast({ title: '未识别到新的活动信息，请上传清晰的活动规则截图', icon: 'none' });
+    } catch (error) {
+      if (!this.disposed && generation === this.recognitionGeneration) this.setData({ imageError: messageOf(error, '截图识别暂时不可用，请稍后重试或手动填写。') });
+    } finally { if (!this.disposed && generation === this.recognitionGeneration) { this.setData({ recognizing: false }); this.syncOptions(); } }
+  },
+  undoRecognition() {
+    if (!this.canEdit() || this.data.recognizing || !this.recognitionSnapshot) return;
+    const lead = { ...this.recognitionSnapshot, imageIds: this.data.lead.imageIds.slice() };
+    this.recognitionSnapshot = null; this.recognitionGeneration++;
+    this.setData({ lead, recognizedFields: {}, recognizedDates: {}, recognizedImages: [], suggestedTitle: '', rewardText: lead.rules?.rewardMinor ? String(lead.rules.rewardMinor / 100) : '', rulesExpanded: !!lead.rules, recognitionDemo: false });
+    this.markDirty();
+  },
+  adoptSuggestedTitle() {
+    if (!this.canEdit() || !this.data.suggestedTitle) return;
+    this.setData({ 'lead.title': this.data.suggestedTitle, suggestedTitle: '', 'recognizedFields.title': true, 'errors.title': '' }); this.markDirty();
+  },
+  async openShot(event: { currentTarget: { dataset: { id: string } } }) {
+    if (this.disposed || this.data.loadingImages) return;
+    const id = event.currentTarget.dataset.id;
+    const generation = this.loadGeneration;
+    const sequence = ++this.previewSequence;
+    if (!this.data.lead.imageIds.includes(id)) return;
+    if (!this.data.assetUrls.some(asset => asset.id === id)) await this.loadImages();
+    if (this.disposed || generation !== this.loadGeneration || sequence !== this.previewSequence || !this.data.lead.imageIds.includes(id)) return;
+    const items = this.data.imageRows.map(row => {
+      const recognized = this.data.recognizedImages.find(item => item.assetId === row.id);
+      return { id: row.id, url: row.url, label: row.label, uploader: '本人', uploadedOn: this.data.today, recognized: recognized?.recognized, attempted: !!recognized, regions: recognized?.regions || [] };
+    });
+    if (!items.find(item => item.id === id)?.url) { this.setData({ imageError: '这张图片暂时无法查看，请重试读取。' }); return; }
+    this.setData({ viewerShow: true, viewerIndex: items.findIndex(item => item.id === id), viewerItems: items });
+  },
+  closeViewer() { this.setData({ viewerShow: false }); },
+  deleteViewerShot(event: { detail: { id: string } }) { this.removeImage({ currentTarget: { dataset: { id: event.detail.id } } }); },
   async addImage() {
-    if (!this.canEdit() || this.data.uploading) return;
+    if (!this.canEdit() || this.data.uploading || this.data.recognizing) return;
     if (this.data.lead.imageIds.length >= 6) { wx.showToast({ title: '最多添加 6 张图片', icon: 'none' }); return; }
     const generation = this.loadGeneration;
     this.setData({ uploading: true });
@@ -195,7 +350,8 @@ Page({
     if (!this.canEdit() || this.data.uploading) return;
     const id = event.currentTarget.dataset.id;
     this.imageGeneration++;
-    this.setData({ 'lead.imageIds': this.data.lead.imageIds.filter(imageId => imageId !== id), assets: this.data.assets.filter(asset => asset.id !== id), assetUrls: this.data.assetUrls.filter(asset => asset.id !== id), loadingImages: false, imageError: '', 'errors.imageIds': '' });
+    this.recognitionGeneration++;
+    this.setData({ 'lead.imageIds': this.data.lead.imageIds.filter(imageId => imageId !== id), assets: this.data.assets.filter(asset => asset.id !== id), assetUrls: this.data.assetUrls.filter(asset => asset.id !== id), recognizedImages: this.data.recognizedImages.filter(item => item.assetId !== id), recognizing: false, loadingImages: false, imageError: '', 'errors.imageIds': '', viewerShow: false });
     this.markDirty();
   },
   async loadImages() {
@@ -241,30 +397,53 @@ Page({
     if (value) wx.setClipboardData({ data: value });
   },
   reject(field: LeadField, message: string): false {
-    this.setData({ [`errors.${field}`]: message, error: '请检查标出的内容，填写后重新提交。' }, () => {
-      if (!this.disposed) wx.pageScrollTo({ selector: `#field-${field}`, offsetTop: -12, duration: 180 });
+    this.setData({ [`errors.${field}`]: message, ...(field === 'rules' ? { rulesExpanded: true } : {}), error: '请检查标出的内容，填写后重新提交。' }, () => {
+      const capsule = wx.getMenuButtonBoundingClientRect?.();
+      const info = wx.getWindowInfo?.();
+      const top = capsule?.top ? capsule.top - Math.max(0, (44 - capsule.height) / 2) : info?.statusBarHeight || 54;
+      if (!this.disposed) wx.pageScrollTo({ selector: `#field-${field}`, offsetTop: -(top + 56), duration: 180 });
     });
     return false;
   },
   validate(): ActivityLead | false {
     const lead: ActivityLead = { ...this.data.lead, title: this.data.lead.title.trim(), sourceUrl: this.data.lead.sourceUrl.trim(), sourceNote: this.data.lead.sourceNote.trim(), imageIds: this.data.lead.imageIds.slice() };
     const errors: Partial<Record<LeadField, string>> = {};
-    if (!lead.title || lead.title.length > 60) errors.title = '请填写 60 字以内的活动名称。';
-    if (!banks.some(bank => bank.id === lead.bankId)) errors.bankId = '请选择活动所属银行。';
+    if (!lead.title) errors.title = '请填写活动名称';
+    else if (lead.title.length > 60) errors.title = '请填写 60 字以内的活动名称。';
+    if (!banks.some(bank => bank.id === lead.bankId)) errors.bankId = '请选择所属银行';
     if (lead.sourceUrl) {
       try { validatePublicHttps(lead.sourceUrl); }
       catch (error) { errors.sourceUrl = messageOf(error, '请填写完整的 HTTPS 公开网页地址。'); }
     }
     if (lead.sourceNote.length > 500) errors.sourceNote = '出处说明最多填写 500 字。';
-    if (!lead.sourceUrl && !lead.sourceNote && !lead.imageIds.length) errors.sourceNote = '请提供来源链接、银行 App 路径或规则截图中的至少一种。';
+    if (!lead.sourceUrl && !lead.sourceNote && !lead.imageIds.length) errors.sourceNote = '请至少提供一种来源：链接、入口路径或截图';
     if (lead.imageIds.length > 6 || new Set(lead.imageIds).size !== lead.imageIds.length) errors.imageIds = '最多添加 6 张不重复的规则截图。';
+    if (lead.rules) {
+      const rules = JSON.parse(JSON.stringify(lead.rules)) as Partial<ActivityDraft>;
+      if (rules.rewardKind || this.data.rewardText) {
+        const amount = rewardValue(this.data.rewardText, rules.rewardKind === 'points');
+        if (!rules.rewardKind) errors.rules = '请选择奖励类型';
+        else if (amount === null || amount <= 0) errors.rules = rules.rewardKind === 'points' ? '积分需要填写大于 0 的整数。' : '请填写大于 0 的奖励数值，最多两位小数。';
+        else rules.rewardMinor = amount;
+      }
+      const validDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(new Date(`${value}T00:00:00Z`).getTime()) && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value;
+      if ((rules.startsOn && !validDate(rules.startsOn)) || (rules.endsOn && !validDate(rules.endsOn))) errors.rules = '请选择有效的活动日期。';
+      else if (rules.startsOn && rules.endsOn && rules.endsOn < rules.startsOn) errors.rules = '结束日期不能早于开始日期。';
+      else if (rules.cycle?.t === 'once' && (!rules.startsOn || !rules.endsOn)) errors.rules = '单次活动需要填写开始和结束日期。';
+      else if (rules.cycle?.t === 'custom' && !rules.startsOn) errors.rules = '自定义周期需要填写活动开始日期。';
+      if (rules.cycle?.t === 'once') rules.cycle = { t: 'once', start: rules.startsOn || '', end: rules.endsOn || '' };
+      if (rules.cycle?.t === 'custom') rules.cycle.anchor = rules.startsOn || '';
+      if (!rules.startsOn) delete rules.startsOn;
+      if (!rules.endsOn) delete rules.endsOn;
+      lead.rules = rules;
+    }
     this.setData({ errors });
     const first = leadFields.find(field => errors[field]);
     if (first) return this.reject(first, errors[first]!);
     return lead;
   },
   async save() {
-    if (this.disposed || !this.data.ready || this.data.loading || this.data.readOnly || this.data.denied || this.data.saving || this.data.submitted || this.data.reloading || this.data.uploading || this.data.conflict || this.data.fullSubmission) return;
+    if (this.disposed || !this.data.ready || this.data.loading || this.data.readOnly || this.data.denied || this.data.saving || this.data.submitted || this.data.reloading || this.data.uploading || this.data.recognizing || this.data.conflict || this.data.fullSubmission) return;
     if (this.data.pendingCreationUnconfirmed && !this.pendingCreation) { this.setData({ error: '上次提交的恢复信息不完整，已保留本机副本。请先到“我的投稿”核对，暂不能再次新建。' }); return; }
     this.setData({ error: '' });
     const lead = this.pendingCreation ? JSON.parse(JSON.stringify(this.pendingCreation.lead)) as ActivityLead : this.validate();
@@ -321,13 +500,14 @@ Page({
     if (this.data.submissionId && (code === 'VERSION_CONFLICT' || code === 'IMMUTABLE' || code === 'INVALID_STATE')) {
       this.setData({ conflict: true, error: '线索内容或审核状态已更新。本次填写仍保留在页面中，请复制需要保留的内容，再读取最新线索核对。' }); return;
     }
-    const field = error && typeof error === 'object' && 'field' in error && typeof error.field === 'string' ? error.field.replace(/^lead\./, '') as LeadField : undefined;
+    const rawField = error && typeof error === 'object' && 'field' in error && typeof error.field === 'string' ? error.field.replace(/^lead\./, '') : undefined;
+    const field = rawField && (rawField.startsWith('rules') || /^(?:rewardKind|rewardMinor|currency|cycle|startsOn|endsOn|conditions|entrance)(?:\.|$)/.test(rawField)) ? 'rules' : rawField as LeadField | undefined;
     const message = messageOf(error, '提交未成功，你的填写内容已保留，请重试。');
     if (field && leadFields.includes(field)) this.reject(field, message);
     else this.setData({ error: message });
   },
   async reloadLatest() {
-    if (!this.canEdit() || this.data.uploading || !this.data.submissionId) return;
+    if (!this.canEdit() || this.data.uploading || this.data.recognizing || !this.data.submissionId) return;
     const context = this.draftContext();
     this.setData({ reloading: true });
     try {

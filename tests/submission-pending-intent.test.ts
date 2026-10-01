@@ -6,6 +6,8 @@ import vm from 'node:vm';
 import ts from 'typescript';
 import * as catalog from '../shared/catalog';
 import * as validation from '../domain/validation';
+import * as activityCycle from '../shared/activity-cycle';
+import * as recognitionForm from '../miniprogram/services/recognition-form';
 import type { ActivityDraft, ApiRequest, Submission } from '../shared/contracts';
 import { MemoryStore } from '../domain/memory-store';
 import { createService } from '../domain/service';
@@ -86,6 +88,7 @@ function harness(route: Route, options: { storage?: Map<string, unknown>; transp
     '../../services/api': { api, ensureSession: options.session || (async () => ({ userId: options.ownerId || 'pending-owner', isModerator: false, today: '2026-09-24' })), uploadImage: async () => { uploads++; return { id: 'new-image' }; }, previewAssets: async (assets: { id: string }[]) => previews.push(assets.map(item => item.id)) },
     '../../services/form-draft': formDrafts, '../../services/navigation': { navigateBackOr: () => navigations.push('back') },
     '../../../shared/catalog': catalog, '../../../domain/validation': validation,
+    '../../../shared/activity-cycle': activityCycle, '../../services/recognition-form': recognitionForm,
   });
   return { page, commands, storage, navigations, modals, formDrafts, previews, uploads: () => uploads };
 }

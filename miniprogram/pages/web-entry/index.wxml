@@ -1,11 +1,13 @@
+<design-nav wx:if="{{!url}}" title="活动入口" back custom-back="{{true}}" bindback="goBack" />
 <web-view wx:if="{{url}}" src="{{url}}" bindload="loaded" binderror="failed"></web-view>
 <view wx:else class="web-entry-page">
   <view class="entry-state">
+    <view class="entry-symbol" aria-hidden="true"><view class="link-line"></view><view class="link-line second"></view></view>
     <text class="entry-title">{{loading ? '正在打开活动网页' : '暂时无法打开网页'}}</text>
     <text class="entry-copy" role="alert">{{error || '请稍候，正在连接银行活动入口。'}}</text>
     <text wx:if="{{sourceUrl}}" class="entry-url" selectable>{{sourceUrl}}</text>
-    <button wx:if="{{canRetry}}" class="primary" bindtap="retry" loading="{{loading}}" disabled="{{loading}}">{{loading ? '正在打开' : '重新打开网页'}}</button>
-    <button wx:if="{{sourceUrl}}" class="secondary" bindtap="copyUrl">复制网页地址</button>
-    <button class="back-button" bindtap="goBack">返回活动</button>
+    <button wx:if="{{canRetry}}" class="primary" bindtap="retry" loading="{{loading}}" disabled="{{loading}}" hover-class="tap-primary">{{loading ? '正在打开' : '重新打开网页'}}</button>
+    <button wx:if="{{sourceUrl}}" class="secondary" bindtap="copyUrl" hover-class="tap-soft">复制网页地址</button>
+    <button class="back-button" bindtap="goBack" hover-class="tap-soft">返回活动</button>
   </view>
 </view>

@@ -4,7 +4,8 @@ import { cardLabel } from './card-labels';
 
 export type EntitlementScope = 'valid' | 'all' | 'archived';
 export type LoungeZoneFilter = 'all' | 'domestic' | 'international';
-export const entitlementKindLabels: Record<EntitlementKind, string> = { lounge: '机场贵宾厅', health_check: '体检', other: '其他权益' };
+export const entitlementKindLabels: Record<EntitlementKind, string> = { lounge: '机场贵宾厅', delay_insurance: '延误险', airport_transfer: '接送机', health_check: '体检', car_wash: '洗车', points: '积分', other: '其他权益' };
+export const loungeProgramLabels = { dragon: '龙腾', pp: 'Priority Pass', plaza: '环亚', unionpay: '银联', other: '其他通道' };
 export const transferabilityLabels: Record<Transferability, string> = { allowed: '明确可转让', grey: '可转让（灰）', not_allowed: '不可转让' };
 export const greyTransferQualification = '灰色转让为本人登记的非官方可行性，使用前仍需核实，不代表银行或服务商认可。';
 
@@ -12,20 +13,37 @@ export interface EntitlementRow {
   id: string; title: string; kind: EntitlementKind; kindLabel: string; cardName: string; provider: string;
   remaining: number; usedUses: number; totalUses: number; period: string; status: string; usable: boolean;
   archived: boolean; transferLabel: string; greyTransfer: boolean; transferNote: string; notes: string; loungeCount: number;
+  counted: boolean; description: string; pointsBalance: number | null; balanceText: string; balanceUnit: string; loungeProgram: string;
 }
 
 export function remainingUses(item: Entitlement): number { return item.totalUses - item.usedUses; }
+export function countedEntitlement(item: Pick<Entitlement, 'kind'>): boolean { return item.kind !== 'delay_insurance' && item.kind !== 'points'; }
+export function pointsText(value: number | string): string { return String(value).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
+export function sumPointsBalance(items: readonly Pick<Entitlement, 'pointsBalance'>[]): string | null {
+  let total = '0';
+  for (const item of items) {
+    if (item.pointsBalance === undefined) return null;
+    const value = String(item.pointsBalance);
+    let result = '', carry = 0;
+    for (let index = 0; index < Math.max(total.length, value.length) || carry; index += 1) {
+      const sum = Number(total[total.length - index - 1] || '0') + Number(value[value.length - index - 1] || '0') + carry;
+      result = String(sum % 10) + result; carry = Math.floor(sum / 10);
+    }
+    total = result.replace(/^0+(?=\d)/, '');
+  }
+  return total;
+}
 
 export function currentEntitlement(item: Entitlement, today: string): boolean {
-  return !item.archivedAt && item.startsOn <= today && item.endsOn >= today && remainingUses(item) > 0;
+  return !item.archivedAt && item.startsOn <= today && item.endsOn >= today && (!countedEntitlement(item) || remainingUses(item) > 0);
 }
 
 export function entitlementStatus(item: Entitlement, today: string): string {
   if (item.archivedAt) return '已归档';
   if (item.startsOn > today) return '尚未生效';
   if (item.endsOn < today) return '已过期';
-  if (remainingUses(item) <= 0) return '次数已用完';
-  return '当前可用';
+  if (countedEntitlement(item) && remainingUses(item) <= 0) return '次数已用完';
+  return countedEntitlement(item) ? '当前可用' : '当前有效';
 }
 
 export function entitlementRow(item: Entitlement, cards: readonly Card[], today: string): EntitlementRow {
@@ -33,9 +51,13 @@ export function entitlementRow(item: Entitlement, cards: readonly Card[], today:
     id: item.id, title: item.title, kind: item.kind, kindLabel: entitlementKindLabels[item.kind],
     cardName: cardLabel(item.cardId, cards), provider: item.provider, remaining: remainingUses(item),
     usedUses: item.usedUses, totalUses: item.totalUses, period: `${item.startsOn} 至 ${item.endsOn}`,
-    status: entitlementStatus(item, today), usable: currentEntitlement(item, today), archived: !!item.archivedAt,
+    status: entitlementStatus(item, today), usable: countedEntitlement(item) && currentEntitlement(item, today), archived: !!item.archivedAt,
     transferLabel: transferabilityLabels[item.transferability], greyTransfer: item.transferability === 'grey',
     transferNote: item.transferNote, notes: item.notes, loungeCount: item.lounges.length,
+    counted: countedEntitlement(item), description: item.description || '', pointsBalance: item.pointsBalance ?? null,
+    balanceText: item.kind === 'points' ? item.pointsBalance === undefined ? '待填写' : pointsText(item.pointsBalance) : countedEntitlement(item) ? String(remainingUses(item)) : '保障说明',
+    balanceUnit: item.kind === 'points' ? item.pointsBalance === undefined ? '' : '分' : countedEntitlement(item) ? '次' : '',
+    loungeProgram: item.loungeProgram ? loungeProgramLabels[item.loungeProgram] : '',
   };
 }
 
@@ -92,7 +114,7 @@ export function searchLounges(items: readonly Entitlement[], search: string, ent
 
 export function validateUsage(item: Entitlement, today: string, quantityInput: string, usedOn: string): { quantity: number; quantityError: string; dateError: string } {
   const quantity = Number(quantityInput.trim());
-  const quantityError = !/^\d+$/.test(quantityInput.trim()) || !Number.isSafeInteger(quantity) || quantity < 1
+  const quantityError = !countedEntitlement(item) ? '这类权益仅登记资料，不按次数记录使用。' : !/^\d+$/.test(quantityInput.trim()) || !Number.isSafeInteger(quantity) || quantity < 1
     ? '请输入大于 0 的整数次数。' : quantity > remainingUses(item) ? `最多可记录 ${remainingUses(item)} 次。` : '';
   const dateError = !isDate(usedOn) ? '请选择有效的使用日期。'
     : usedOn < item.startsOn || usedOn > item.endsOn ? '使用日期必须在这项权益的有效期内。'

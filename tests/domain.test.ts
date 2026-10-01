@@ -126,7 +126,7 @@ test('period rollover preserves completed records and records receipts in their 
   assert.equal(dashboard.pendingRewards.length, 0);
 });
 
-test('missed visits backfill recurring periods and untracking never removes old pending rewards', async () => {
+test('missed visits backfill recurring periods and withdrawal keeps pending history while hiding follow-up', async () => {
   const f = fixture();
   const joined = await f.command('activity.join', { activityId: 'activity-a' });
   await f.command('participation.complete', { participationId: joined.id });
@@ -136,7 +136,11 @@ test('missed visits backfill recurring periods and untracking never removes old 
   await f.command('activity.untrack', { participationId: joined.id });
   f.setDate('2027-02-02');
   const dashboard = await f.query<Dashboard>('dashboard.get');
-  assert.equal(dashboard.pendingRewards.length, 1);
+  assert.equal(dashboard.pendingRewards.length, 0);
+  assert.equal(dashboard.tasks.length, 0);
+  const history = await f.query<{ items: Participation[] }>('history.list');
+  assert.equal(history.items.find(record => record.id === joined.id)?.stage, 'completed');
+  assert.ok(history.items.every(record => record.withdrawnAt));
   assert.equal((await f.store.find('participations')).length, 4);
   await f.command('activity.join', { activityId: 'activity-a' });
   await f.query('dashboard.get');

@@ -1,4 +1,4 @@
-export type Collection = 'activities' | 'activity_revisions' | 'submissions' | 'cards' | 'billing_accounts' | 'bills' | 'trackings' | 'participations' | 'rewards' | 'assets' | 'audit_events' | 'preferences' | 'requests' | 'reminder_jobs' | 'reminder_grants' | 'entitlements' | 'entitlement_usages';
+export type Collection = 'activities' | 'activity_revisions' | 'submissions' | 'cards' | 'billing_accounts' | 'bills' | 'trackings' | 'participations' | 'consumptions' | 'rewards' | 'assets' | 'audit_events' | 'preferences' | 'requests' | 'reminder_jobs' | 'reminder_grants' | 'entitlements' | 'entitlement_usages';
 export interface Condition { field: string; op: 'eq' | 'ne' | 'lt' | 'lte' | 'gt' | 'gte' | 'in'; value: unknown; }
 export interface FindOptions { where?: Condition[]; orderBy?: { field: string; direction: 'asc' | 'desc' }[]; offset?: number; limit?: number; }
 export interface Store {
@@ -11,6 +11,7 @@ export interface Store {
 export interface ServiceOptions {
   now?: () => Date;
   demo?: boolean;
+  recognizeAssets?: (actor: import('../shared/contracts').Actor, assets: import('../shared/contracts').Asset[]) => Promise<import('../shared/contracts').AssetRecognition[]>;
   templateIds?: Partial<Record<import('../shared/contracts').ReminderJob['kind'], string>>;
   validateAsset?: (actor: import('../shared/contracts').Actor, payload: import('../shared/contracts').Commands['asset.register']) => Promise<void | Pick<import('../shared/contracts').Asset, 'fileId' | 'cloudPath' | 'size' | 'mime'>>;
 }

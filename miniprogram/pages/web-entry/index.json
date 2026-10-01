@@ -1,1 +1,7 @@
-{ "navigationBarTitleText": "活动入口" }
+{
+  "navigationBarTitleText": "活动入口",
+  "navigationStyle": "custom",
+  "usingComponents": {
+    "design-nav": "/components/design-nav/index"
+  }
+}

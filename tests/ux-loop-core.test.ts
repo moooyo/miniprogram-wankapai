@@ -228,7 +228,7 @@ test('a wallet with no matching card offers a bank-prefilled add-card path witho
   assert.equal(instance.data.showCards, false);
   assert.equal(navigation.at(-1)?.url, '/pages/card-edit/index?bankId=cmb');
   const markup = readFileSync('miniprogram/pages/detail/index.wxml', 'utf8');
-  assert.match(markup, /scope === 'card' \? '这项活动按卡片记录，请先添加符合条件的卡片/);
+  assert.match(markup, /这个活动按卡计算。请选择实际使用、且符合当前条件的卡片/);
   assert.match(markup, /现有卡片均不符合条件。请添加符合条件的卡片后继续/);
   assert.match(markup, /wx:if="\{\{matchingCardCount\}\}"[^>]*bindtap="confirmCard"/);
   assert.match(markup, /bindtap="chooseCard" disabled="\{\{!item\.matches/);

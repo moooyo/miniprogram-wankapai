@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import ts from 'typescript';
 
-test('sheet titles keep their full text while yielding width to the 48px close target', () => {
+test('sheet titles keep their full text while yielding width to the design 44px close target', () => {
   const markup = readFileSync('miniprogram/components/app-sheet/index.wxml', 'utf8');
   const styles = readFileSync('miniprogram/components/app-sheet/index.wxss', 'utf8');
   const titleRule = /\.sheet-title\s*\{([^}]+)\}/.exec(styles)?.[1] || '';
@@ -17,8 +17,8 @@ test('sheet titles keep their full text while yielding width to the 48px close t
   assert.match(titleRule, /overflow-wrap\s*:\s*anywhere\s*;/);
   assert.match(titleRule, /white-space\s*:\s*normal\s*;/);
   assert.doesNotMatch(titleRule, /ellipsis|line-clamp|overflow\s*:\s*hidden/);
-  assert.match(closeRule, /width\s*:\s*48px\s*;/);
-  assert.match(closeRule, /height\s*:\s*48px\s*;/);
+  assert.match(closeRule, /width\s*:\s*44px\s*;/);
+  assert.match(closeRule, /height\s*:\s*44px\s*;/);
   assert.match(closeRule, /flex\s*:\s*none\s*;/);
 });
 
@@ -50,7 +50,7 @@ test('a wrapped sheet header is measured before allocating its remaining scroll 
   assert.equal(instance.data.bodyHeight, 518);
   headerHeight = 160;
   instance.data.title = 'W'.repeat(60);
-  definition.observers['contentState.**, title'].call(instance);
+  definition.observers['contentState.**, title, fullScreen'].call(instance);
   assert.equal(instance.data.title.length, 60);
   assert.equal(instance.data.bodyHeight, 422);
   assert.ok(instance.data.bodyHeight > 0 && instance.data.bodyHeight < 1600);

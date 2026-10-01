@@ -1,10 +1,12 @@
 # Bank Benefits Mini Program
 
-A native WeChat Mini Program implementing the accepted blue-and-white design. It preserves the original workflow: user submission, operator review, public activity discovery, private participation tracking, a card wallet, recurring periods, reward receipts, and scoped reminders.
+A native WeChat Mini Program implementing the latest activity-feature handoff. The interface has four primary tabs: progress, activities, cards and benefits, and account. It preserves moderated public submissions, private participation tracking, a card wallet, recurring periods, reward receipts, and scoped reminders.
+
+The 2026-10-02 rewrite adds screenshot browsing, authenticated screenshot recognition with explicit demo fixtures, five reward kinds, weekly and custom cycles, withdrawal with retained history, and progress restoration on rejoin. The handoff is reimplemented in native WXML/WXSS and TypeScript. See [Design implementation](docs/design-handoff-20261002.md) and [Native design acceptance](docs/design-acceptance.md).
 
 ## Current delivery
 
-- 19 native pages and 3 reusable components.
+- 19 native pages and 5 reusable components.
 - Native WXML/WXSS/TypeScript source, shared business logic, and two CloudBase functions.
 - A prebuilt `dist/` directory in the downloadable delivery archive, generated and verified on the designated remote environment. Git tracks source only; `dist/` is intentionally ignored.
 - Explicit, persistent demonstration mode with fictional activities. It makes no cloud calls or message deliveries.
@@ -20,7 +22,7 @@ For a Git checkout, generate `dist/` with `npm ci` followed by `npm run build` i
 2. Sign in to WeChat DevTools with WeChat and obtain your own Mini Program [test account](https://developers.weixin.qq.com/miniprogram/dev/devtools/sandbox.html). The committed `touristappid` is only a placeholder; guest mode is not the supported execution path.
 3. Put the test AppID in the root `project.private.config.json` as `{ "appid": "YOUR_TEST_APPID" }`, then import the **project root containing `project.config.json`**. The private file is ignored by Git and overrides shared configuration. The project points to `dist/miniprogram/` and `dist/cloudfunctions/`. If DevTools rewrites shared configuration during import, keep the personal AppID in the private file.
 4. Keep `miniprogram/runtime-config.js` in `mode: 'demo'`. The compiled copy in `dist/miniprogram/runtime-config.js` already matches it.
-5. Use the five tabs. The user page exposes a clearly labeled demonstration role switch so the submission/review flow can be tried without giving a production user moderator privileges.
+5. Use the four tabs. Income is available from progress as a secondary page. The account page exposes a clearly labeled demonstration role switch so the submission/review flow can be tried without giving a production user moderator privileges.
 
 Demonstration records are saved in the developer tool/device's own storage. Uploaded demonstration images are saved to local Mini Program files. They are not uploaded to a real cloud environment. Clearing the demonstration cache removes local demonstration records. Official bank overview links in the sample data are not registration links for the fictional offers.
 

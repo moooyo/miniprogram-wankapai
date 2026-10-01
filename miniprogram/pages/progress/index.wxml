@@ -1,4 +1,5 @@
-<view class="entry-page">
+<design-nav title="记录进度" back custom-back="{{true}}" bindback="back" />
+<view class="entry-page"><view class="entry-panel">
   <view wx:if="{{loading}}" class="entry-state" role="status">正在读取进度…</view>
   <view wx:elif="{{loadError}}" class="entry-state">
     <view class="entry-error">{{loadError}}</view>
@@ -28,7 +29,7 @@
     </view>
     <checkbox-group wx:if="{{showRegistration}}" bindchange="onRegistrationChange" class="entry-registration">
       <label class="entry-check-label">
-        <checkbox value="registered" checked="{{registered}}" disabled="{{busy || reloading || !editable}}" color="#1768df" />
+        <checkbox value="registered" checked="{{registered}}" disabled="{{busy || reloading || !editable}}" color="#1F61D8" />
         <view>
           <view>已完成银行报名</view>
           <view class="entry-hint">如活动需要报名，可在这里记录</view>
@@ -43,4 +44,5 @@
       <button class="entry-primary" bindtap="save" loading="{{busy}}" disabled="{{busy || reloading || conflict || !editable}}">{{busy ? '正在保存' : reapplyRequired ? '重新应用并保存' : '保存进度'}}</button>
     </view>
   </block>
+</view>
 </view>

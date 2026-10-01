@@ -3,6 +3,8 @@ import type { ActivityDraft, ActivityLead, Asset, MutationResult, Submission } f
 import { banks, issuers, networks } from '../../../shared/catalog';
 import { loadDraft, saveDraft, removeDraft, getDraftRevision, confirmDraftRecovery, createCommandIntent } from '../../services/form-draft';
 import { navigateBackOr } from '../../services/navigation';
+import { activityCycle } from '../../../shared/activity-cycle';
+import { cleanRewardInput, cycleOptions, cyclePreview, defaultCycle, intervalOptions, rewardOptions, rewardUnit, weekdayOptions } from '../../services/recognition-form';
 
 type FormSection = 'basic' | 'rules' | 'entrance' | 'source';
 type InputEvent = { currentTarget: { dataset: { field: string; section?: FormSection; id?: string } }; detail: { value: string | boolean | string[] } };
@@ -29,7 +31,7 @@ const fieldSections: Record<string, FormSection> = {
 const frequencies: Option[] = [{ id: 'once', name: '一次性' }, { id: 'monthly', name: '每月' }, { id: 'quarterly', name: '每季度' }, { id: 'yearly', name: '每年' }];
 const currencies: Option[] = [{ id: 'CNY', name: '人民币 CNY' }, { id: 'HKD', name: '港币 HKD' }, { id: 'MOP', name: '澳门元 MOP' }];
 const cardKinds: Option[] = [{ id: 'credit', name: '信用卡' }, { id: 'debit', name: '储蓄卡' }, { id: 'any', name: '信用卡与储蓄卡' }];
-const rewardKinds: Option[] = [{ id: 'cashback', name: '返现／奖励' }, { id: 'discount', name: '即时立减' }];
+const rewardKinds: Option[] = rewardOptions;
 const scopes: Option[] = [{ id: 'user', name: '每人一份' }, { id: 'card', name: '每张符合条件的卡一份' }];
 const entranceKinds: Option[] = [{ id: 'guide', name: '图片或操作路径' }, { id: 'web', name: '网页链接' }, { id: 'miniprogram', name: '微信小程序' }];
 const unitOptions = ['次', '笔', '元', '港元', '澳门元'];
@@ -46,7 +48,9 @@ function freshDraft(today: string): ActivityDraft {
   return { title: '', bankId: '', issuerIds: [], networks: [], cardKind: 'credit', cardDescription: '', frequency: 'once', startsOn: today, endsOn: '', target: 1, unit: '次', currency: 'CNY', rewardMinor: 0, rewardKind: 'cashback', scope: 'user', requiresRegistration: false, requiresInvitation: false, conditions: '', sourceUrl: '', sourceNote: '', entrance: { kind: 'guide', label: '参与入口', instructions: '', imageIds: [] } };
 }
 function draftFromLead(lead: ActivityLead): ActivityDraft {
-  return { ...freshDraft(''), title: lead.title, bankId: lead.bankId, sourceUrl: lead.sourceUrl, sourceNote: lead.sourceNote };
+  const draft = { ...freshDraft(''), ...lead.rules, title: lead.title, bankId: lead.bankId, sourceUrl: lead.sourceUrl, sourceNote: lead.sourceNote };
+  draft.entrance = { kind: 'guide', label: '参与入口', instructions: '', imageIds: [], ...lead.rules?.entrance };
+  return draft;
 }
 function isSavedLead(value: SavedLeadInput): boolean {
   const lead = value?.lead;
@@ -62,7 +66,7 @@ function validDate(value: string): boolean {
   return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
 }
 function amountMinor(value: string): number | null {
-  if (!/^(?:0|[1-9]\d{0,7})(?:\.\d{1,2})?$/.test(value)) return null;
+  if (!/^(?:0|[1-9]\d{0,8})(?:\.\d{1,2})?$/.test(value)) return null;
   const [whole, decimal = ''] = value.split('.');
   return Number(whole) * 100 + Number(decimal.padEnd(2, '0'));
 }
@@ -114,6 +118,9 @@ Page({
     unitOptions, unitIndex: 0, assets: [] as Asset[], assetUrls: [] as { id: string; url: string }[], imageRows: [] as { id: string; label: string; available: boolean; url: string }[],
     sourceImageIds: [] as string[], sourceImageRows: [] as { id: string; label: string; url: string; used: boolean }[],
     bankSummary: '选择银行与适用卡', ruleSummary: '填写周期、门槛和奖励', entranceSummary: '添加参与入口', sourceSummary: '添加可核实出处',
+    rewardOptions, cycleOptions, weekdayOptions, intervalOptions, bankGrid: banks, selectedBank: null as typeof banks[number] | null,
+    cycleType: '', cycleDay: 1, cycleWeekday: 1, cycleN: 1, cycleUnit: 'month', intervalLabel: '个月', cyclePreview: '', rewardUnit: '元', publishReady: false,
+    viewerShow: false, viewerIndex: 0, viewerItems: [] as Record<string, unknown>[], originalBankName: '', originalBankLogo: '',
   },
   onLoad(options: { id?: string; review?: string; fromLead?: string }) {
     this.creationIntentKey = createCommandIntent();
@@ -183,7 +190,7 @@ Page({
         }
         if (savedLead && isSavedLead(savedLead.value)) {
           const lead = savedLead.value.lead;
-          this.setData({ draft: draftFromLead(lead), targetText: '', rewardText: '', sourceImageIds: lead.imageIds.slice(), importedLead: true });
+          this.setData({ draft: draftFromLead(lead), targetText: lead.rules?.target ? String(lead.rules.target) : '', rewardText: lead.rules?.rewardMinor ? String(lead.rules.rewardMinor / 100) : '', sourceImageIds: lead.imageIds.slice(), importedLead: true });
           this.markDirty();
         }
       }
@@ -199,14 +206,20 @@ Page({
     const readOnly = !!submission && (submission.status === 'published' || (this.data.reviewMode && submission.status !== 'pending'));
     const leadReview = !!submission?.lead && !submission.draft;
     this.draftBaseVersion = submission?.version ?? null;
-    this.setData({ ready: true, ownerId, today, draft, submission, readOnly, leadReview, importedLead: false, sourceImageIds: submission?.lead?.imageIds || [], targetText: leadReview ? '' : String(draft.target), rewardText: draft.rewardMinor ? (draft.rewardMinor / 100).toFixed(2) : '', reviewNote: submission?.reviewNote || '', dirty: false, draftEdited: false, sourceVerified: false, conflict: false, errors: {}, errorSummary: [], error: '', localDraftStatus: '', openSection: 'basic', assets: [], assetUrls: [] });
+    this.setData({ ready: true, ownerId, today, draft, submission, readOnly, leadReview, importedLead: false, sourceImageIds: submission?.lead?.imageIds || [], targetText: leadReview && !submission?.lead?.rules?.target ? '' : String(draft.target), rewardText: draft.rewardMinor ? String(draft.rewardMinor / 100) : '', reviewNote: submission?.reviewNote || '', dirty: false, draftEdited: false, sourceVerified: false, conflict: false, errors: {}, errorSummary: [], error: '', localDraftStatus: '', openSection: 'basic', assets: [], assetUrls: [], viewerShow: false });
     this.syncOptions();
     wx.setNavigationBarTitle({ title: this.data.reviewMode ? (readOnly ? '处理结果' : '核实活动') : (readOnly ? '投稿详情' : this.data.submissionId ? '修改投稿' : '分享活动') });
   },
   syncOptions() {
     const draft = this.data.draft;
     const selectedBank = banks.find(bank => bank.id === draft.bankId);
+    const cycle = draft.cycle || (!this.data.leadReview ? activityCycle(draft) : undefined);
     this.setData({
+      originalBankName: banks.find(bank => bank.id === (this.data.submission?.lead?.bankId || this.data.submission?.draft?.bankId))?.name || '',
+      originalBankLogo: banks.find(bank => bank.id === (this.data.submission?.lead?.bankId || this.data.submission?.draft?.bankId))?.logo || '',
+      selectedBank: selectedBank || null, cycleType: cycle?.t || '', cycleDay: cycle?.t === 'month' ? cycle.day : 1, cycleWeekday: cycle?.t === 'week' ? cycle.weekday : 1,
+      cycleN: cycle?.t === 'custom' ? cycle.n : 1, cycleUnit: cycle?.t === 'custom' ? cycle.unit : 'month', intervalLabel: cycle?.t === 'custom' ? intervalOptions.find(unit => unit.id === cycle.unit)?.name || '个月' : '个月',
+      cyclePreview: cyclePreview(cycle, this.data.today), rewardUnit: rewardUnit(draft), publishReady: Number(this.data.rewardText) > 0 && !!cycle,
       bankIndex: this.data.bankOptions.findIndex(item => item.id === draft.bankId),
       issuerOptions: issuers.filter(item => item.bankId === draft.bankId).map(item => ({ id: item.id, name: item.name, checked: draft.issuerIds.includes(item.id) })),
       networkOptions: networks.map(item => ({ ...item, checked: draft.networks.includes(item.id) })),
@@ -262,16 +275,22 @@ Page({
     const saved = this.persistDraft();
     wx.enableAlertBeforeUnload({ message: saved ? '草稿已保存在本机，尚未提交。' : '草稿未能保存在本机，离开可能丢失。' });
   },
+  navigationScrollOffset(): number {
+    const capsule = wx.getMenuButtonBoundingClientRect?.();
+    const info = wx.getWindowInfo?.();
+    const top = capsule?.top ? capsule.top - Math.max(0, (44 - capsule.height) / 2) : info?.statusBarHeight || 54;
+    return -(top + 56);
+  },
   toggleSection(event: { currentTarget: { dataset: { section: FormSection } } }) {
     const section = event.currentTarget.dataset.section;
     if (!formSections.includes(section)) return;
     if (section !== this.data.openSection) this.previewSequence++;
-    this.setData({ openSection: section }, () => { wx.pageScrollTo({ selector: `#section-${section}`, offsetTop: -12, duration: 180 }); });
+    this.setData({ openSection: section }, () => { wx.pageScrollTo({ selector: `#section-${section}`, offsetTop: this.navigationScrollOffset(), duration: 180 }); });
   },
   input(event: InputEvent) {
     if (!this.canEdit()) return;
     const field = event.currentTarget.dataset.field;
-    const value = String(event.detail.value);
+    const value = field === 'rewardText' ? cleanRewardInput(String(event.detail.value), this.data.draft.rewardKind === 'points') : String(event.detail.value);
     const allowed = ['title', 'cardDescription', 'conditions', 'sourceUrl', 'sourceNote', 'entrance.label', 'entrance.url', 'entrance.appId', 'entrance.path', 'entrance.shortLink', 'entrance.instructions'];
     if (['targetText', 'rewardText', 'reviewNote'].includes(field)) this.setData({ [field]: value });
     else if (allowed.includes(field)) this.setData({ [`draft.${field}`]: value });
@@ -312,9 +331,53 @@ Page({
     if (!this.canEdit()) return;
     const field = event.currentTarget.dataset.field;
     if (!['startsOn', 'endsOn'].includes(field)) return;
-    this.setData({ [`draft.${field}`]: String(event.detail.value), [`errors.${field}`]: '' });
+    const value = String(event.detail.value);
+    if (field === 'endsOn' && this.data.draft.startsOn && value < this.data.draft.startsOn) { wx.showToast({ title: '结束日期不能早于开始日期', icon: 'none' }); return; }
+    this.setData({ [`draft.${field}`]: value, [`errors.${field}`]: '' });
+    if (field === 'startsOn' && this.data.draft.endsOn && value > this.data.draft.endsOn) this.setData({ 'draft.endsOn': '' });
+    if (this.data.draft.cycle?.t === 'once') this.setData({ 'draft.cycle.start': this.data.draft.startsOn, 'draft.cycle.end': this.data.draft.endsOn });
+    if (this.data.draft.cycle?.t === 'custom') this.setData({ 'draft.cycle.anchor': this.data.draft.startsOn });
     this.syncErrorSummary();
     this.markDirty();
+  },
+  selectBankGrid(event: { currentTarget: { dataset: { id: string } } }) {
+    const index = this.data.bankOptions.findIndex(bank => bank.id === event.currentTarget.dataset.id);
+    if (index > 0) this.select({ currentTarget: { dataset: { field: 'bankId' } }, detail: { value: String(index) } });
+  },
+  selectReward(event: { currentTarget: { dataset: { id: string } } }) {
+    if (!this.canEdit()) return;
+    const kind = event.currentTarget.dataset.id;
+    if (!rewardOptions.some(item => item.id === kind)) return;
+    this.setData({ 'draft.rewardKind': kind, rewardText: cleanRewardInput(this.data.rewardText, kind === 'points'), 'errors.rewardKind': '', 'errors.rewardText': '' });
+    this.syncErrorSummary(); this.markDirty();
+  },
+  selectCycle(event: { currentTarget: { dataset: { id: string } } }) {
+    if (!this.canEdit()) return;
+    const type = event.currentTarget.dataset.id;
+    if (!cycleOptions.some(item => item.id === type)) return;
+    this.setData({ 'draft.cycle': defaultCycle(type, this.data.draft.startsOn, this.data.draft.endsOn), 'draft.frequency': type === 'once' ? 'once' : 'monthly', 'errors.frequency': '' });
+    this.syncErrorSummary(); this.markDirty();
+  },
+  selectWeekday(event: { currentTarget: { dataset: { id: number } } }) {
+    if (!this.canEdit() || this.data.draft.cycle?.t !== 'week') return;
+    const weekday = Number(event.currentTarget.dataset.id);
+    if (!weekdayOptions.some(item => item.id === weekday)) return;
+    this.setData({ 'draft.cycle.weekday': weekday }); this.markDirty();
+  },
+  stepCycle(event: { currentTarget: { dataset: { delta: number } } }) {
+    if (!this.canEdit()) return;
+    const cycle = this.data.draft.cycle;
+    const delta = Number(event.currentTarget.dataset.delta);
+    if (cycle?.t === 'month') this.setData({ 'draft.cycle.day': Math.max(1, Math.min(28, cycle.day + delta)) });
+    else if (cycle?.t === 'custom') this.setData({ 'draft.cycle.n': Math.max(1, Math.min(cycle.unit === 'day' ? 90 : 12, cycle.n + delta)) });
+    else return;
+    this.markDirty();
+  },
+  selectInterval(event: { currentTarget: { dataset: { id: string } } }) {
+    if (!this.canEdit() || this.data.draft.cycle?.t !== 'custom') return;
+    const unit = event.currentTarget.dataset.id;
+    if (!intervalOptions.some(item => item.id === unit)) return;
+    this.setData({ 'draft.cycle.unit': unit, 'draft.cycle.n': Math.min(unit === 'day' ? 90 : 12, this.data.draft.cycle.n) }); this.markDirty();
   },
   selectIssuers(event: InputEvent) {
     if (!this.canEdit()) return;
@@ -381,7 +444,7 @@ Page({
   invalidateImageMembership() {
     this.imageGeneration++;
     const ids = new Set(this.currentImageIds());
-    this.setData({ assets: this.data.assets.filter(asset => ids.has(asset.id)), assetUrls: this.data.assetUrls.filter(asset => ids.has(asset.id)), loadingImages: false });
+    this.setData({ assets: this.data.assets.filter(asset => ids.has(asset.id)), assetUrls: this.data.assetUrls.filter(asset => ids.has(asset.id)), loadingImages: false, viewerShow: false });
   },
   async loadImages() {
     if (this.disposed) return;
@@ -426,8 +489,29 @@ Page({
     try { await previewAssets(assets, index, shouldOpen); }
     catch (error) { if (shouldOpen()) { this.setData({ 'errors.imageIds': error instanceof Error ? error.message : '图片暂时无法打开，请重试。' }); this.syncErrorSummary(); } }
   },
-  copySource() {
-    const value = [this.data.draft.sourceUrl, this.data.draft.sourceNote].filter(Boolean).join('\n');
+  async openShot(event: { currentTarget: { dataset: { id: string; scope?: string } } }) {
+    if (this.disposed || this.data.loadingImages) return;
+    const id = event.currentTarget.dataset.id;
+    const source = event.currentTarget.dataset.scope === 'source';
+    const ids = (source ? this.data.sourceImageIds : this.data.draft.entrance.imageIds).slice();
+    if (!ids.includes(id)) return;
+    const generation = this.loadGeneration;
+    const sequence = ++this.previewSequence;
+    if (!this.data.assetUrls.some(asset => asset.id === id)) await this.loadImages();
+    const currentIds = source ? this.data.sourceImageIds : this.data.draft.entrance.imageIds;
+    if (this.disposed || generation !== this.loadGeneration || sequence !== this.previewSequence || ids.length !== currentIds.length || !ids.every((imageId, index) => imageId === currentIds[index])) return;
+    const items = ids.map((imageId, index) => ({ id: imageId, url: this.data.assetUrls.find(asset => asset.id === imageId)?.url || '', label: source ? `活动规则 ${index + 1}` : `报名入口 ${index + 1}`, uploader: source ? '投稿人' : '本人', uploadedOn: this.data.submission?.createdAt.slice(0, 10) || this.data.today }));
+    if (!items.find(item => item.id === id)?.url) { this.setData({ 'errors.imageIds': '这张图片暂时无法查看，请重新读取后重试。' }); this.syncErrorSummary(); return; }
+    this.setData({ viewerShow: true, viewerIndex: items.findIndex(item => item.id === id), viewerItems: items });
+  },
+  closeViewer() { this.setData({ viewerShow: false }); },
+  copyViewerSource(event: { detail: { id?: string; url?: string } }) {
+    const item = this.data.viewerItems.find(image => image.id === event.detail.id) || this.data.viewerItems[this.data.viewerIndex];
+    if (item && typeof item.url === 'string' && item.url) wx.setClipboardData({ data: item.url });
+  },
+  copySource(event?: { currentTarget: { dataset: { scope?: string } } }) {
+    const source = event?.currentTarget.dataset.scope === 'original' ? this.data.submission?.lead || this.data.submission?.draft || this.data.draft : this.data.draft;
+    const value = [source.sourceUrl, source.sourceNote].filter(Boolean).join('\n');
     if (value) wx.setClipboardData({ data: value });
   },
   syncErrorSummary() {
@@ -452,7 +536,7 @@ Page({
     if (!section) return;
     if (section !== this.data.openSection) this.previewSequence++;
     this.setData({ openSection: section }, () => {
-      if (!this.disposed) wx.pageScrollTo({ selector: `#field-${field.replace(/\./g, '-')}`, offsetTop: -12, duration: 180 });
+      if (!this.disposed) wx.pageScrollTo({ selector: `#field-${field.replace(/\./g, '-')}`, offsetTop: this.navigationScrollOffset(), duration: 180 });
     });
   },
   reject(field: string, message: string, section: FormSection): false {
@@ -463,7 +547,7 @@ Page({
     section = fieldSections[field] || section;
     if (section !== this.data.openSection) this.previewSequence++;
     this.setData({ [`errors.${field}`]: message, openSection: section, error: '请检查标出的内容，填写后重新提交。' }, () => {
-      wx.pageScrollTo({ selector: fieldSections[field] ? `#field-${field.replace(/\./g, '-')}` : `#section-${section}`, offsetTop: -12, duration: 180 });
+      wx.pageScrollTo({ selector: fieldSections[field] ? `#field-${field.replace(/\./g, '-')}` : `#section-${section}`, offsetTop: this.navigationScrollOffset(), duration: 180 });
     });
     this.syncErrorSummary();
     return false;
@@ -502,8 +586,11 @@ Page({
     else if (['次', '笔'].includes(draft.unit) && !Number.isInteger(Number(target))) issue('targetText', '次数和笔数需要填写正整数。', 'rules');
     draft.target = Number(target);
     const reward = amountMinor(this.data.rewardText.trim());
-    if (reward === null || reward <= 0) issue('rewardText', '请填写大于 0 的奖励金额，最多两位小数。', 'rules');
+    if (reward === null || reward <= 0 || this.data.rewardText.trim().length > 9) issue('rewardText', '请填写大于 0 的奖励数值，最多两位小数、9 位字符。', 'rules');
+    else if (draft.rewardKind === 'points' && reward % 100 !== 0) issue('rewardText', '积分需要填写大于 0 的整数。', 'rules');
     else draft.rewardMinor = reward;
+    if (draft.cycle?.t === 'once') draft.cycle = { t: 'once', start: draft.startsOn, end: draft.endsOn };
+    if (draft.cycle?.t === 'custom') draft.cycle.anchor = draft.startsOn;
     if (draft.entrance.kind === 'web' && !isHttps(draft.entrance.url || '')) issue('entrance.url', '请填写完整的 HTTPS 活动入口链接。', 'entrance');
     if (draft.entrance.kind === 'miniprogram') {
       if (!draft.entrance.shortLink && !/^wx[a-f0-9]{16}$/i.test(draft.entrance.appId || '')) issue('entrance.appId', '请填写有效的小程序 AppID，或填写小程序短链接。', 'entrance');
@@ -531,7 +618,7 @@ Page({
       if (issues.length > 1) {
         this.syncErrorSummary();
         this.setData({ error: '请检查以下内容，点击提示可前往对应位置。' }, () => {
-          if (!this.disposed) wx.pageScrollTo({ selector: '#validation-summary', offsetTop: -12, duration: 180 });
+          if (!this.disposed) wx.pageScrollTo({ selector: '#validation-summary', offsetTop: this.navigationScrollOffset(), duration: 180 });
         });
         return false;
       }
@@ -662,8 +749,8 @@ Page({
     if (this.data.submissionId && (code === 'VERSION_CONFLICT' || code === 'IMMUTABLE' || code === 'INVALID_STATE')) { this.setData({ conflict: true, error: '稿件已被更新或处理。本次填写仍保留在页面中，请读取最新版本后再处理。' }); return; }
     const field = error && typeof error === 'object' && 'field' in error && typeof error.field === 'string' ? error.field.replace(/^draft\./, '') : '';
     if (!field) { this.setData({ error: message }); return; }
-    const name = field === 'target' ? 'targetText' : field === 'rewardMinor' ? 'rewardText' : field === 'entrance.imageIds' ? 'imageIds' : field;
-    const section: FormSection = field.startsWith('entrance') ? 'entrance' : ['sourceUrl', 'sourceNote', 'sourceVerified', 'reviewNote'].includes(field) ? 'source' : ['target', 'rewardMinor', 'startsOn', 'endsOn', 'frequency', 'unit', 'currency', 'scope', 'rewardKind'].includes(field) ? 'rules' : 'basic';
+    const name = field === 'target' ? 'targetText' : field === 'rewardMinor' ? 'rewardText' : field === 'entrance.imageIds' ? 'imageIds' : field.startsWith('cycle') ? 'frequency' : field;
+    const section: FormSection = field.startsWith('entrance') ? 'entrance' : ['sourceUrl', 'sourceNote', 'sourceVerified', 'reviewNote'].includes(field) ? 'source' : field.startsWith('cycle') || ['target', 'rewardMinor', 'startsOn', 'endsOn', 'frequency', 'unit', 'currency', 'scope', 'rewardKind'].includes(field) ? 'rules' : 'basic';
     this.reject(name, message, section);
   },
   async reloadLatest() {

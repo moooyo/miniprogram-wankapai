@@ -1,4 +1,4 @@
-import { Activity, Bank, Card, Detail, Issuer } from '../../../shared/contracts';
+import { Activity, Bank, Card, Commands, Consumption, Detail, Issuer, Participation } from '../../../shared/contracts';
 import { banks, issuers } from '../../../shared/catalog';
 import { api, ensureSession, openEntrance, previewAssets, requestReminder } from '../../services/api';
 import { money, periodLabel, showError } from '../../services/format';
@@ -6,13 +6,47 @@ import { cardLabel } from '../../services/card-labels';
 import { benefitCopy } from '../../services/benefit-copy';
 import { navigateBackOr } from '../../services/navigation';
 import { entranceActionLabel } from '../../services/entrance';
+import { cycleLabel, cycleView, rewardKindLabel, screenshotItems, shortDate, usableCardLabel } from '../../services/activity-design';
+import { confirmDraftRecovery, createCommandIntent, getDraftRevision, loadDraft, removeDraft, saveDraft } from '../../services/form-draft';
 
 type DirectAction = 'join' | 'complete' | 'receipt';
-type DetailSheet = '' | 'manage' | 'rules' | 'cards' | 'expected' | 'guide';
+type DetailSheet = '' | 'manage' | 'rules' | 'cards' | 'expected' | 'guide' | 'quit' | 'consumption' | 'consumptionRecord';
+type PendingConsumption = { intentKey: string; payload: Commands['participation.consume'] };
+type PendingConsumptionRevoke = { intentKey: string; payload: Commands['consumption.revoke'] };
+type ConsumptionDraft = { amount: string; merchant: string; on: string; delta: string;
+  pending: PendingConsumption | null; revokePending: PendingConsumptionRevoke | null; selectedId: string };
 type CardChoice = { id: string; name: string; issuer: string; qualification: string; matches: boolean };
 type ReminderReadyContext = { kind: 'deadline' | 'reward'; recordId: string; version: number; stage: string;
   expectedOn: string | null; endsOn: string; load: number; visibility: number; sequence: number };
-const frequencyNames = { once: '一次性', monthly: '每月', quarterly: '每季度', yearly: '每年' };
+
+function consumptionMode(record: Participation): 'count' | 'amount' | 'custom' {
+  return ['笔', '次'].includes(record.snapshot.unit) ? 'count' : ['元', '港元', '澳门元'].includes(record.snapshot.unit) ? 'amount' : 'custom';
+}
+function consumptionNumber(raw: string): number | null {
+  if (!/^\d+(?:\.\d{1,2})?$/.test(raw.trim())) return null;
+  const value = Number(raw);
+  return Number.isFinite(value) && value >= 0 && value <= 1000000000 ? value : null;
+}
+function sanitizeConsumptionAmount(value: string): string {
+  const cleaned = value.replace(/[^\d.]/g, '');
+  const parts = cleaned.split('.');
+  const integer = (parts[0] || (parts.length > 1 ? '0' : '')).replace(/^0+(?=\d)/, '').slice(0, 9);
+  return parts.length > 1 ? `${integer}.${parts.slice(1).join('').slice(0, 2)}` : integer;
+}
+function consumptionPreview(record: Participation, amount: string, delta: string) {
+  const mode = consumptionMode(record);
+  const increase = mode === 'count' ? 1 : consumptionNumber(mode === 'amount' ? amount : delta) || 0;
+  const next = Math.round((record.progress + increase) * 100) / 100;
+  const completed = next >= record.snapshot.target;
+  return { consumptionPreview: `保存后 ${next}/${record.snapshot.target} ${record.snapshot.unit}${completed ? '，已达标' : ''}`,
+    consumptionSaveLabel: completed ? '保存并达标' : '保存', consumptionNextProgress: next };
+}
+function errorCode(error: unknown): string { return (error as { code?: string })?.code || ''; }
+function validConsumptionDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const timestamp = Date.parse(`${value}T00:00:00Z`);
+  return Number.isFinite(timestamp) && new Date(timestamp).toISOString().slice(0, 10) === value;
+}
 
 function cardMismatchReasons(activity: Activity, card: Card): string[] {
   const reasons: string[] = [];
@@ -23,12 +57,14 @@ function cardMismatchReasons(activity: Activity, card: Card): string[] {
   return reasons;
 }
 
-function detailView(detail: Detail, serverToday: string) {
+function detailView(detail: Detail, serverToday: string, cards: Card[] = []) {
   const activity = detail.participation?.snapshot || detail.activity;
   const participation = detail.participation;
   const benefit = benefitCopy(activity.rewardKind);
   const bank = banks.find((value: Bank) => value.id === activity.bankId);
   const finished = participation?.stage === 'completed' || participation?.stage === 'received';
+  const withdrawn = !!participation?.withdrawnAt;
+  const joined = !!participation && !withdrawn;
   const remaining = Math.max(0, activity.target - (participation?.progress || 0));
   const primaryAction = !participation ? 'join' : participation.stage === 'skipped' ? 'resume'
     : finished || benefit.isDiscount ? 'receipt' : activity.target > 1 && remaining > 0 ? 'progress' : 'complete';
@@ -36,13 +72,29 @@ function detailView(detail: Detail, serverToday: string) {
     : primaryAction === 'progress' ? '更新进度' : primaryAction === 'complete' ? '标记完成'
     : participation?.stage === 'received' ? benefit.editAction : benefit.recordAction;
   const progressLabel = participation?.stage === 'received' ? benefit.recordedStatus : participation?.stage === 'completed' ? benefit.completedStatus : participation?.stage === 'skipped' ? '本期不参加' : participation?.progress ? `${participation.progress} / ${activity.target} ${activity.unit}` : participation?.registeredAt ? '已报名' : '尚未开始';
+  const cycle = cycleView(activity, serverToday, participation);
+  const labels = benefit.isDiscount ? [activity.requiresRegistration ? '报名' : '参与', '达标', '立减'] : [activity.requiresRegistration ? '报名' : '参与', '达标', '待到账', '到账'];
+  const currentStep = participation?.stage === 'received' ? labels.length : participation?.stage === 'completed' ? 2 : activity.requiresRegistration && !participation?.registeredAt ? 0 : 1;
+  const requiresRegistration = joined && !finished && activity.requiresRegistration && !participation?.registeredAt;
+  const canJoin = withdrawn || detail.eligible;
+  const primaryUiAction = withdrawn ? 'rejoin' : !participation ? canJoin ? 'join' : 'disabled' : participation.stage === 'received' ? 'done'
+    : participation.stage === 'skipped' ? 'resume' : requiresRegistration ? 'register' : finished ? 'receipt' : 'consumption';
+  const primaryUiLabel = primaryUiAction === 'rejoin' ? '重新参加' : primaryUiAction === 'join' ? '参加活动' : primaryUiAction === 'disabled' ? '暂不可参加'
+    : primaryUiAction === 'register' ? '已完成报名' : primaryUiAction === 'consumption' ? '记录消费'
+    : primaryUiAction === 'done' ? `${benefit.recordedStatus} ${money(participation?.receivedMinor || 0, activity.currency, activity.rewardKind)}` : primaryLabel;
+  const quitRows = ['从「进度」中移除，不再提醒截止与到账', finished ? '已达标的奖励将不再提醒到账确认'
+    : participation?.progress ? `本期已记录 ${participation.progress}/${activity.target} ${activity.unit}，记录将保留在「全部参与记录」` : '记录将保留在「全部参与记录」',
+    cycle.repeating && cycle.nextStartsOn ? `${shortDate(cycle.nextStartsOn)} 重置后，不再自动跟进下一期` : '如需恢复，可在活动详情页点击「重新参加」，原有进度将保留'];
+  if (activity.requiresRegistration && participation?.registeredAt) quitRows.push('仅停止玩卡派内的跟进，不影响银行 App 中的报名状态');
   return {
     activity,
     benefit,
     bankName: bank?.name || '银行活动',
     logo: bank?.logo || '',
-    frequencyLabel: frequencyNames[activity.frequency],
-    reward: money(participation?.receivedMinor ?? activity.rewardMinor, activity.currency),
+    frequencyLabel: cycleLabel(activity),
+    cycle, joined, withdrawn, canJoin, primaryUiAction, primaryUiLabel, requiresRegistration,
+    reward: money(participation?.receivedMinor ?? activity.rewardMinor, activity.currency, activity.rewardKind),
+    rewardKindLabel: rewardKindLabel(activity),
     rewardLabel: participation?.stage === 'received' ? benefit.actualLabel : benefit.expectedLabel,
     endsOn: participation?.endsOn || activity.endsOn,
     periodLabel: participation ? periodLabel(participation.periodKey) : '',
@@ -55,6 +107,24 @@ function detailView(detail: Detail, serverToday: string) {
     progressPercent: Math.min(100, Math.max(0, (participation?.progress || 0) / activity.target * 100)),
     showProgress: !!participation && activity.target > 1 && participation.progress > 0 && !finished && participation.stage !== 'skipped',
     progressHelp: participation?.progress ? remaining > 0 ? `还差 ${remaining} ${activity.unit}` : `已达到记录目标，可标记完成或${benefit.recordAction}` : benefit.isDiscount ? '优惠当场抵扣后，可记录实际享受的优惠' : participation?.registeredAt ? `待完成 ${activity.target} ${activity.unit}` : activity.requiresRegistration ? '参与前请先在银行完成报名' : '完成后可直接标记结果',
+    progressHint: participation?.stage === 'received' ? benefit.recordedStatus : participation?.stage === 'completed' ? benefit.pendingStatus : participation?.stage === 'skipped' ? '本期不参加' : requiresRegistration ? '请先在银行 App 报名' : remaining > 0 ? `还需 ${remaining} ${activity.unit}` : '已达标',
+    progressText: `${participation?.progress || 0}/${activity.target}`,
+    segmented: activity.target > 1 && activity.target <= 12 && !['元', '港元', '澳门元'].includes(activity.unit),
+    segments: Array.from({ length: Math.min(12, activity.target) }, (_, index) => ({ id: index, filled: index < (participation?.progress || 0) })),
+    dueLine: participation?.stage === 'received' ? '本期已完成' : participation?.stage === 'completed' ? participation.expectedOn ? `预计 ${shortDate(participation.expectedOn)} 到账` : '达标后请确认实际奖励' : `${shortDate(participation?.endsOn || cycle.endsOn)} 截止`,
+    steps: labels.map((label, index) => ({ id: index, number: index + 1, label, done: index < currentStep, current: index === currentStep,
+      lineFilled: index <= currentStep, sub: label === '待到账' && participation?.expectedOn ? shortDate(participation.expectedOn) : '' })),
+    eligibilityTitle: usableCardLabel(activity, cards),
+    eligibilitySubtitle: withdrawn ? '你曾退出该活动，重新参加后将恢复原有进度' : canJoin ? '参加后将加入「进度」，按周期提醒截止与到账，可随时退出。' : '卡包中暂无符合条件的卡片',
+    bankShortName: bank?.shortName || '银行',
+    periodDescription: `${activity.startsOn.replace(/-/g, '/')} – ${activity.endsOn.replace(/-/g, '/')}，${cycle.repeating ? cycleLabel(activity) : '单次活动'}`,
+    quitRows,
+    lastChecked: shortDate((activity.entrance.verifiedAt || activity.updatedAt).slice(0, 10)),
+    shots: screenshotItems(detail.assets),
+    consumptions: (detail.consumptions || []).map(record => ({ id: record.id, date: record.consumedOn.slice(5).replace('-', '/'),
+      merchant: record.merchant || '手动记录', amount: record.amountMinor === null ? '—' : money(record.amountMinor, record.currency),
+      reversed: !!record.reversedAt, progressLabel: `+${record.progressDelta} ${activity.unit}` })),
+    consumptionCount: (detail.consumptions || []).filter(record => !record.reversedAt).length,
     receivedMonth: participation?.receivedOn ? `${Number(participation.receivedOn.slice(5, 7))} 月` : '',
     entryAction: entranceActionLabel(activity.entrance),
     sourceAction: entranceActionLabel({ kind: 'web', url: activity.sourceUrl, label: '银行规则来源', instructions: activity.sourceNote, imageIds: [] }, 'source'),
@@ -73,6 +143,14 @@ Page({
     loading: true, refreshing: false, refreshError: '', outdated: false, mutationNotice: '', busy: false, preparingCards: false, error: '',
     reminderChecking: false, reminderReady: false, reminderError: '',
     showManage: false, showRules: false, showCards: false, showExpected: false, showGuide: false,
+    showQuit: false, viewerOpen: false, viewerItems: [] as ReturnType<typeof screenshotItems>, viewerIndex: 0,
+    showConsumption: false, showConsumptionRecord: false, showCelebration: false,
+    consumptionAmount: '', consumptionMerchant: '', consumptionOn: '', consumptionDelta: '', consumptionMode: 'count' as 'count' | 'amount' | 'custom',
+    consumptionCurrencySymbol: '¥', consumptionPresets: [] as { value: string; label: string }[], consumptionDirty: false,
+    consumptionPreview: '', consumptionDateLabel: '', consumptionSaveLabel: '保存', consumptionNextProgress: 0, consumptionError: '', consumptionNotice: '',
+    consumptionConflict: false, consumptionReapplyRequired: false, consumptionReloading: false, consumptionBaseVersion: 0,
+    consumptionPending: null as PendingConsumption | null, consumptionRevokePending: null as PendingConsumptionRevoke | null,
+    selectedConsumptionId: '', selectedConsumption: null as Consumption | null, selectedConsumptionAmount: '',
     expectedOn: '', expectedError: '', expectedBase: '', expectedDirty: false, expectedClosing: false, expectedLatestNote: '',
     selectedCardName: '',
     cards: [] as CardChoice[], matchingCardCount: 0, cardRequirement: '', cardBankId: '', selectedCardId: '', pendingAction: 'join' as DirectAction,
@@ -87,8 +165,11 @@ Page({
   preparingReminder: false,
   reminderReadyContext: null as ReminderReadyContext | null,
   visibilitySequence: 0,
-  onHide() { this.visible = false; this.visibilitySequence += 1; this.previewSequence += 1; this.cancelCardPreparation(); this.cancelReminderPreparation(); this.clearReminderReadiness(); },
-  onUnload() { this.visible = false; this.cancelCardPreparation(); this.disposed = true; this.cancelReminderPreparation(); this.clearReminderReadiness(); this.loadSequence += 1; this.previewSequence += 1; this.visibilitySequence += 1; },
+  consumptionSequence: 0,
+  consumptionDraftRecord: '',
+  consumptionDraftFingerprint: '',
+  onHide() { this.persistConsumption(); this.visible = false; this.visibilitySequence += 1; this.previewSequence += 1; this.setData({ viewerOpen: false, showCelebration: false }); this.cancelCardPreparation(); this.cancelReminderPreparation(); this.clearReminderReadiness(); },
+  onUnload() { this.persistConsumption(); this.visible = false; this.cancelCardPreparation(); this.disposed = true; this.cancelReminderPreparation(); this.clearReminderReadiness(); this.loadSequence += 1; this.previewSequence += 1; this.visibilitySequence += 1; this.consumptionSequence += 1; },
   onLoad(options: Record<string, string>) {
     this.setData({ activityId: options.id || options.activityId || '', participationId: options.participationId || '' });
   },
@@ -100,7 +181,9 @@ Page({
   },
   syncLeaveAlert() {
     if (!this.isForeground()) return;
-    if (this.data.showExpected && this.data.expectedDirty) wx.enableAlertBeforeUnload({ message: '预计到账日尚未保存，离开后修改将丢失。' });
+    if (this.data.consumptionPending || this.data.consumptionRevokePending) wx.enableAlertBeforeUnload({ message: '消费保存结果尚未确认，原请求已暂存，返回后请继续核对。' });
+    else if (this.data.showConsumption && this.data.consumptionDirty) wx.enableAlertBeforeUnload({ message: '消费记录尚未保存，填写内容已暂存本机。' });
+    else if (this.data.showExpected && this.data.expectedDirty) wx.enableAlertBeforeUnload({ message: '预计到账日尚未保存，离开后修改将丢失。' });
     else wx.disableAlertBeforeUnload();
   },
   showPageError(error: unknown) { if (this.isForeground()) showError(error); },
@@ -113,7 +196,7 @@ Page({
     this.cancelCardPreparation();
     this.cancelReminderPreparation();
     this.clearReminderReadiness();
-    if (this.data.showManage || this.data.showCards) this.commitSheet('');
+    if (this.data.showManage || this.data.showCards || this.data.showQuit) this.commitSheet('');
     const sequence = ++this.loadSequence;
     const query = { ...(this.data.activityId ? { activityId: this.data.activityId } : {}),
       ...(this.data.participationId ? { participationId: this.data.participationId } : {}) };
@@ -123,16 +206,18 @@ Page({
       if (this.disposed || sequence !== this.loadSequence) return;
       const detail = await api.query('activity.get', query);
       if (this.disposed || sequence !== this.loadSequence) return;
-      const view = detailView(detail, session.today);
       const linkedCardId = detail.participation?.cardId;
-      const [urls, selectedCardName] = await Promise.all([
+      const [urls, wallet] = await Promise.all([
         detail.assets.length ? api.query('assets.urls', { ids: detail.assets.map(asset => asset.id) }).catch(() => null) : Promise.resolve(null),
-        linkedCardId ? api.query('wallet.get', {}).then(wallet => cardLabel(linkedCardId, wallet.cards)).catch(() => '本次关联卡片暂未加载') : Promise.resolve(''),
+        api.query('wallet.get', {}).catch(() => null),
       ]);
       if (this.disposed || sequence !== this.loadSequence) return;
+      const view = detailView(detail, session.today, wallet?.cards || []);
+      const selectedCardName = linkedCardId ? wallet ? cardLabel(linkedCardId, wallet.cards) : '本次关联卡片暂未加载' : '';
       if (urls) {
         const resolvedUrls = new Map(urls.map(item => [item.id, item.url]));
         view.entryImages = view.entryImages.map(item => ({ ...item, url: resolvedUrls.get(item.id) || item.url }));
+        view.shots = screenshotItems(detail.assets, urls);
       }
       const expectedState: Record<string, unknown> = {};
       if (this.data.showExpected) {
@@ -148,6 +233,17 @@ Page({
       }
       this.setData({ detail, view, serverToday: session.today, activityId: detail.activity.id, participationId: detail.participation?.id || this.data.participationId, selectedCardName,
         outdated: false, mutationNotice: '', reminderError: '', ...expectedState });
+      if (this.data.showConsumption && this.data.consumptionDirty && !this.data.consumptionPending && detail.participation
+        && this.data.consumptionBaseVersion !== detail.participation.version) {
+        this.setData({ consumptionConflict: true, consumptionReapplyRequired: true,
+          consumptionNotice: '活动记录已有更新，当前填写仍保留。请核对最新进度后确认应用。' });
+      }
+      if (this.data.selectedConsumptionId) {
+        const selected = detail.consumptions?.find(row => row.id === this.data.selectedConsumptionId) || null;
+        this.setData({ selectedConsumption: selected, selectedConsumptionAmount: selected ? selected.amountMinor === null ? '—' : money(selected.amountMinor, selected.currency) : '' });
+        if (!selected && this.data.showConsumptionRecord && !this.data.consumptionRevokePending) this.commitSheet('');
+      }
+      this.restorePendingConsumption(detail.participation);
       this.syncLeaveAlert();
     } catch (error) {
       if (!this.disposed && sequence === this.loadSequence) {
@@ -157,7 +253,7 @@ Page({
     }
     finally { if (!this.disposed && sequence === this.loadSequence) this.setData({ loading: false, refreshing: false }); }
   },
-  actionsBlocked(): boolean { return this.disposed || !this.data.detail || !this.data.view || this.data.loading || this.data.refreshing || this.data.outdated || this.data.busy || this.data.expectedClosing; },
+  actionsBlocked(): boolean { return this.disposed || !this.data.detail || !this.data.view || this.data.loading || this.data.refreshing || this.data.outdated || this.data.busy || this.data.expectedClosing || this.data.consumptionReloading || !!this.data.consumptionPending || !!this.data.consumptionRevokePending; },
   cancelCardPreparation(notify = false) {
     this.cardPreparationSequence += 1;
     if (!this.data.preparingCards) return;
@@ -169,7 +265,9 @@ Page({
     this.cancelCardPreparation();
     this.previewSequence += 1;
     this.setData({ showManage: sheet === 'manage', showRules: sheet === 'rules', showCards: sheet === 'cards',
-      showExpected: sheet === 'expected', showGuide: sheet === 'guide', selectedCardId: '', cardSelectionError: '', ...patch });
+      showExpected: sheet === 'expected', showGuide: sheet === 'guide', showQuit: sheet === 'quit', viewerOpen: false,
+      showConsumption: sheet === 'consumption', showConsumptionRecord: sheet === 'consumptionRecord', showCelebration: false,
+      selectedCardId: '', cardSelectionError: '', ...patch });
     this.syncLeaveAlert();
   },
   switchContext(change: () => void | Promise<void>): void | Promise<void> {
@@ -185,10 +283,14 @@ Page({
     if (this.data.showExpected && this.data.expectedDirty) return this.closeExpected().then(() => {
       if (!this.data.showExpected) return proceed();
     });
+    if (this.data.showConsumption && this.data.consumptionDirty && !this.data.consumptionPending) return this.closeConsumption().then(() => {
+      if (!this.data.showConsumption) return proceed();
+    });
     return proceed();
   },
   closeSheet(sheet: Exclude<DetailSheet, '' | 'expected'>) {
-    const visible = { manage: this.data.showManage, rules: this.data.showRules, cards: this.data.showCards, guide: this.data.showGuide };
+    const visible = { manage: this.data.showManage, rules: this.data.showRules, cards: this.data.showCards, guide: this.data.showGuide, quit: this.data.showQuit,
+      consumption: this.data.showConsumption, consumptionRecord: this.data.showConsumptionRecord };
     if (visible[sheet]) return this.switchContext(() => this.commitSheet(''));
   },
   retry() { if (!this.data.busy && !this.data.expectedClosing) void this.load(); },
@@ -276,7 +378,8 @@ Page({
           ? await api.command('activity.join', { activityId: this.data.activityId, cardId: cardId || this.data.detail.participation?.cardId })
           : await api.command('participation.complete', { activityId: this.data.activityId, participationId, cardId });
         if (this.disposed) return;
-        const message = action === 'join' ? '已加入待办' : benefitCopy(this.data.view!.activity.rewardKind).completedToast;
+        const message = action === 'join' ? existing?.withdrawnAt ? '已重新参加，原有进度已恢复'
+          : this.data.view!.activity.requiresRegistration ? '已加入进度，请先在银行 App 完成报名' : '已加入进度' : benefitCopy(this.data.view!.activity.rewardKind).completedToast;
         this.setData({ participationId: result.id, mutationNotice: action === 'join' ? '加入待办已保存。' : '完成状态已保存。' });
         this.showPageToast(message);
         await this.load();
@@ -287,8 +390,322 @@ Page({
   editProgress() {
     if (this.actionsBlocked()) return;
     const record = this.data.detail?.participation;
-    if (!record || ['completed', 'received', 'skipped'].includes(record.stage)) return;
+    if (!record || record.withdrawnAt || ['completed', 'received', 'skipped'].includes(record.stage)) return;
     return this.switchContext(() => { this.commitSheet(''); wx.navigateTo({ url: `/pages/progress/index?id=${encodeURIComponent(record.id)}&activityId=${encodeURIComponent(this.data.activityId)}` }); });
+  },
+  persistConsumption(): boolean {
+    const record = this.data.detail?.participation;
+    if (!record) return false;
+    if (!this.data.consumptionDirty && !this.data.consumptionPending && !this.data.consumptionRevokePending) return true;
+    const value: ConsumptionDraft = { amount: this.data.consumptionAmount, merchant: this.data.consumptionMerchant,
+      on: this.data.consumptionOn, delta: this.data.consumptionDelta, pending: this.data.consumptionPending,
+      revokePending: this.data.consumptionRevokePending, selectedId: this.data.selectedConsumptionId };
+    const fingerprint = JSON.stringify(value);
+    if (fingerprint === this.consumptionDraftFingerprint) {
+      const stored = loadDraft<ConsumptionDraft>('detail-consumption', record.ownerId, record.id);
+      if (stored && JSON.stringify(stored.value) === fingerprint) return true;
+    }
+    const saved = saveDraft('detail-consumption', record.ownerId, record.id, this.data.consumptionBaseVersion || record.version, value);
+    if (saved) this.consumptionDraftFingerprint = fingerprint;
+    else this.setData({ consumptionNotice: '本机暂存失败，当前填写仍保留。' });
+    return saved;
+  },
+  restorePendingConsumption(record: Participation | null) {
+    if (!record || this.consumptionDraftRecord === record.id || this.data.consumptionDirty) return;
+    const saved = loadDraft<ConsumptionDraft>('detail-consumption', record.ownerId, record.id);
+    const value = saved?.value;
+    if (!value) return;
+    const pending = value.pending;
+    const revoke = value.revokePending;
+    const validIntent = (intent: string) => typeof intent === 'string' && intent.length > 0 && intent.length <= 128;
+    const validPending = pending && validIntent(pending.intentKey) && pending.payload?.participationId === record.id
+      && Number.isSafeInteger(pending.payload.expectedVersion) && validConsumptionDate(pending.payload.consumedOn);
+    const validRevoke = revoke && validIntent(revoke.intentKey) && typeof revoke.payload?.id === 'string'
+      && Number.isSafeInteger(revoke.payload.expectedVersion);
+    if (!validPending && !validRevoke) return;
+    this.consumptionDraftRecord = record.id;
+    this.consumptionDraftFingerprint = JSON.stringify(value);
+    this.setData({ consumptionAmount: typeof value.amount === 'string' ? value.amount : '', consumptionMerchant: typeof value.merchant === 'string' ? value.merchant : '',
+      consumptionOn: typeof value.on === 'string' ? value.on : record.startsOn, consumptionDelta: typeof value.delta === 'string' ? value.delta : '',
+      consumptionPending: validPending ? pending : null, consumptionRevokePending: validRevoke ? revoke : null,
+      selectedConsumptionId: typeof value.selectedId === 'string' ? value.selectedId : '', consumptionDirty: !!validPending,
+      consumptionBaseVersion: validPending ? pending!.payload.expectedVersion : revoke!.payload.expectedVersion,
+      consumptionNotice: '上次保存结果尚未确认，请继续核对原请求。' });
+  },
+  consumptionBlocked(): boolean {
+    return this.disposed || !this.isForeground() || !this.data.detail?.participation || this.data.loading || this.data.refreshing
+      || this.data.outdated || this.data.busy || this.data.expectedClosing || this.data.consumptionReloading;
+  },
+  async openConsumption() {
+    const record = this.data.detail?.participation;
+    if (this.consumptionBlocked() || !record || this.data.consumptionRevokePending) return;
+    if (!this.data.consumptionPending && (record.withdrawnAt || ['completed', 'received', 'skipped'].includes(record.stage))) return;
+    await this.switchContext(async () => {
+      if (this.consumptionBlocked()) return;
+      const mode = consumptionMode(record), remaining = Math.max(0, record.snapshot.target - record.progress);
+      const values = mode === 'amount' ? [200, 500, remaining].filter(value => value > 0) : [50, 100, 250];
+      const defaultOn = this.data.serverToday < record.startsOn ? record.startsOn : this.data.serverToday > record.endsOn ? record.endsOn : this.data.serverToday;
+      const existing = this.consumptionDraftRecord === record.id && (this.data.consumptionDirty || this.data.consumptionPending);
+      const patch: Record<string, unknown> = { consumptionMode: mode, consumptionCurrencySymbol: { CNY: '¥', HKD: 'HK$', MOP: 'MOP$' }[record.snapshot.currency],
+        consumptionPresets: [...new Set(values)].map(value => ({ value: String(value), label: mode === 'amount' && value === remaining ? `补齐 ${money(Math.round(value * 100), record.snapshot.currency)}` : money(Math.round(value * 100), record.snapshot.currency) })) };
+      if (existing && !this.data.consumptionPending && this.data.consumptionBaseVersion !== record.version) Object.assign(patch,
+        { consumptionConflict: true, consumptionReapplyRequired: true, consumptionNotice: '当前进度已有更新，请读取最新记录并核对原填写。' });
+      if (!existing) {
+        Object.assign(patch, { consumptionAmount: '', consumptionMerchant: '', consumptionOn: defaultOn, consumptionDelta: '', consumptionDirty: false,
+          consumptionBaseVersion: record.version, consumptionError: '', consumptionNotice: '', consumptionConflict: false, consumptionReapplyRequired: false });
+        const saved = loadDraft<ConsumptionDraft>('detail-consumption', record.ownerId, record.id);
+        if (saved && !saved.value.pending && !saved.value.revokePending
+          && ['amount', 'merchant', 'on', 'delta'].every(key => typeof saved.value[key as keyof ConsumptionDraft] === 'string')) {
+          const visibility = this.visibilitySequence;
+          const recover = await confirmDraftRecovery(saved, record.version);
+          if (!this.isForeground() || visibility !== this.visibilitySequence) return;
+          const latest = this.data.detail?.participation;
+          if (!latest || latest.id !== record.id || latest.ownerId !== record.ownerId) return;
+          if (recover) Object.assign(patch, { consumptionAmount: saved.value.amount, consumptionMerchant: saved.value.merchant,
+            consumptionOn: saved.value.on, consumptionDelta: saved.value.delta, consumptionDirty: true,
+            consumptionConflict: saved.baseVersion !== latest.version, consumptionReapplyRequired: saved.baseVersion !== latest.version,
+            consumptionNotice: '已恢复未保存内容，请核对活动期与当前进度。' });
+          else removeDraft('detail-consumption', record.ownerId, record.id);
+        }
+      }
+      this.consumptionDraftRecord = record.id;
+      this.commitSheet('consumption', patch);
+      this.updateConsumptionPreview();
+    });
+  },
+  async closeConsumption() {
+    if (this.disposed || this.data.busy || this.data.expectedClosing || !this.data.showConsumption) return;
+    this.persistConsumption();
+    this.commitSheet('');
+  },
+  updateConsumptionPreview() {
+    const record = this.data.detail?.participation;
+    if (record) this.setData({ ...consumptionPreview(record, this.data.consumptionAmount, this.data.consumptionDelta), consumptionDateLabel: this.data.consumptionOn.replace(/-/g, '/') });
+  },
+  changeConsumption(field: 'consumptionAmount' | 'consumptionMerchant' | 'consumptionOn' | 'consumptionDelta', value: string) {
+    if (this.consumptionBlocked() || !this.data.showConsumption || this.data.consumptionPending || this.data.consumptionRevokePending || this.data.consumptionConflict || this.data.consumptionReapplyRequired) return;
+    this.setData({ [field]: value, consumptionDirty: true, consumptionError: '' });
+    this.updateConsumptionPreview(); this.persistConsumption(); this.syncLeaveAlert();
+  },
+  changeConsumptionAmount(event: any) { this.changeConsumption('consumptionAmount', sanitizeConsumptionAmount(String(event.detail.value || ''))); },
+  changeConsumptionMerchant(event: any) { this.changeConsumption('consumptionMerchant', String(event.detail.value || '').slice(0, 80)); },
+  changeConsumptionDate(event: any) { this.changeConsumption('consumptionOn', String(event.detail.value || '')); },
+  changeConsumptionDelta(event: any) { this.changeConsumption('consumptionDelta', sanitizeConsumptionAmount(String(event.detail.value || ''))); },
+  chooseConsumptionPreset(event: any) { this.changeConsumption('consumptionAmount', String(event.currentTarget.dataset.value || '')); },
+  async saveConsumption() {
+    const record = this.data.detail?.participation;
+    if (this.consumptionBlocked() || !record || !this.data.showConsumption || this.data.consumptionPending || this.data.consumptionRevokePending
+      || this.data.consumptionConflict || this.data.consumptionReapplyRequired || record.withdrawnAt || ['completed', 'received', 'skipped'].includes(record.stage)) return;
+    const amount = this.data.consumptionAmount.trim(), parsedAmount = amount ? consumptionNumber(amount) : null;
+    const mode = consumptionMode(record), delta = mode === 'count' ? 1 : mode === 'amount' ? parsedAmount : consumptionNumber(this.data.consumptionDelta);
+    if (amount && parsedAmount === null) { this.setData({ consumptionError: '请输入有效金额，最多两位小数。' }); return; }
+    if (delta === null || delta <= 0) { this.setData({ consumptionError: mode === 'amount' ? '请输入大于 0 的消费金额。' : '请输入本次增加的有效进度。' }); return; }
+    const consumedOn = this.data.consumptionOn;
+    if (!validConsumptionDate(consumedOn) || consumedOn < record.startsOn || consumedOn > record.endsOn || consumedOn > this.data.serverToday) {
+      this.setData({ consumptionError: '消费日期须在本期内，且不能晚于今天。' }); return;
+    }
+    const payload: Commands['participation.consume'] = { participationId: record.id, consumedOn, expectedVersion: record.version,
+      ...(parsedAmount !== null ? { amountMinor: Math.round(parsedAmount * 100) } : {}),
+      ...(this.data.consumptionMerchant.trim() ? { merchant: this.data.consumptionMerchant.trim() } : {}),
+      ...(mode !== 'count' ? { progressDelta: delta } : {}) };
+    this.setData({ consumptionPending: { intentKey: createCommandIntent(), payload }, consumptionBaseVersion: record.version, consumptionError: '' });
+    if (!this.persistConsumption()) {
+      this.setData({ consumptionPending: null, consumptionError: '本机暂存失败，消费尚未发送。请释放存储空间后重试，当前填写仍保留。' });
+      this.syncLeaveAlert(); return;
+    }
+    this.syncLeaveAlert();
+    await this.executeConsumption(false, true);
+  },
+  async retryConsumption() { await this.executeConsumption(false); },
+  async executeConsumption(lookupOnly: boolean, fresh = false) {
+    const pending = this.data.consumptionPending, record = this.data.detail?.participation;
+    if (this.consumptionBlocked() || !pending || !record || pending.payload.participationId !== record.id) return;
+    if (!this.persistConsumption()) {
+      this.setData({ ...(fresh ? { consumptionPending: null } : {}), consumptionError: '本机暂存失败，本次操作尚未发送。原填写仍保留，请稍后重试。' });
+      this.syncLeaveAlert(); return;
+    }
+    const sequence = ++this.consumptionSequence, visibility = this.visibilitySequence, load = this.loadSequence;
+    const ownerId = record.ownerId;
+    let revision = getDraftRevision('detail-consumption', ownerId, record.id);
+    const current = () => !this.disposed && sequence === this.consumptionSequence;
+    const foreground = () => current() && this.isForeground() && visibility === this.visibilitySequence && load === this.loadSequence;
+    this.setData({ busy: true, consumptionError: '' });
+    try {
+      const session = await ensureSession(true);
+      if (!current()) return;
+      if (!foreground()) return;
+      if (session.userId !== ownerId) throw new Error('身份已变化，请使用原账号核对消费保存结果。');
+      if (!this.persistConsumption()) {
+        this.setData({ ...(fresh ? { consumptionPending: null } : {}), consumptionError: '本机暂存失败，本次操作尚未发送。当前填写仍保留。' });
+        this.syncLeaveAlert(); return;
+      }
+      revision = getDraftRevision('detail-consumption', ownerId, record.id);
+      const replayOnly = lookupOnly || !!record.withdrawnAt || ['received', 'skipped'].includes(record.stage)
+        || record.version !== pending.payload.expectedVersion || (!fresh && session.today > record.endsOn);
+      const result = await api.command('participation.consume', pending.payload, { intentKey: pending.intentKey, ...(replayOnly ? { replayOnly: true } : {}) });
+      removeDraft('detail-consumption', ownerId, record.id, revision);
+      if (!current()) return;
+      this.consumptionDraftFingerprint = '';
+      this.setData({ consumptionPending: null, consumptionDirty: false, consumptionConflict: false, consumptionReapplyRequired: false,
+        consumptionNotice: '', consumptionAmount: '', consumptionMerchant: '', consumptionOn: '', consumptionDateLabel: '', consumptionDelta: '', mutationNotice: '消费记录已保存。' });
+      if (!foreground()) return;
+      this.commitSheet('');
+      this.showPageToast('消费记录已保存', 'success');
+      await this.load();
+      if (current() && this.isForeground() && visibility === this.visibilitySequence && this.data.detail?.participation?.stage === 'completed'
+        && record.progress < record.snapshot.target && result.version === this.data.detail.participation.version) this.setData({ showCelebration: true });
+      this.syncLeaveAlert();
+    } catch (error) {
+      if (!current()) return;
+      const code = errorCode(error);
+      if (code === 'VERSION_CONFLICT') {
+        this.setData({ consumptionPending: null, consumptionConflict: true, consumptionError: '记录已被更新，填写内容已保留。请读取最新记录并核对后再保存。' });
+      } else if (['INVALID_INPUT', 'INVALID_DATE', 'FORBIDDEN', 'ACTIVITY_INACTIVE', 'NOT_FOUND'].includes(code)) {
+        this.setData({ consumptionPending: null, consumptionError: (error as Error).message || '这笔消费尚未保存，请核对记录后重试。' });
+      } else this.setData({ consumptionError: '保存结果尚未确认。原金额、日期及操作标识已保留，请继续核对原请求。' });
+      this.persistConsumption(); this.syncLeaveAlert();
+    } finally { if (current()) this.setData({ busy: false }); }
+  },
+  async reloadConsumption() {
+    if (this.consumptionBlocked()) return;
+    if (this.data.consumptionPending) { await this.executeConsumption(true); return; }
+    this.setData({ consumptionReloading: true, consumptionError: '' });
+    try {
+      await this.load();
+      if (this.disposed || !this.isForeground()) return;
+      if (this.data.outdated) return;
+      this.setData({ consumptionConflict: false, consumptionReapplyRequired: true, consumptionNotice: '已读取最新进度。请核对消费日期和新增进度，再确认应用当前填写。' });
+      this.updateConsumptionPreview();
+    } finally { if (!this.disposed) this.setData({ consumptionReloading: false }); }
+  },
+  reviewConsumption() {
+    const record = this.data.detail?.participation;
+    if (this.consumptionBlocked() || !record || !this.data.showConsumption || this.data.consumptionPending || record.withdrawnAt || ['completed', 'received', 'skipped'].includes(record.stage)) return;
+    this.setData({ consumptionConflict: false, consumptionReapplyRequired: false, consumptionBaseVersion: record.version, consumptionError: '', consumptionNotice: '已确认采用最新记录，请核对后保存。' });
+    this.updateConsumptionPreview(); this.persistConsumption();
+  },
+  openConsumptionRecord(event: any) {
+    if (this.consumptionBlocked() || this.data.consumptionPending) return;
+    const selected = this.data.detail?.consumptions?.find(record => record.id === event.currentTarget.dataset.id);
+    if (!selected) return;
+    if (this.data.consumptionRevokePending && this.data.consumptionRevokePending.payload.id !== selected.id) return;
+    return this.switchContext(() => this.commitSheet('consumptionRecord', { selectedConsumptionId: selected.id, selectedConsumption: selected,
+      selectedConsumptionAmount: selected.amountMinor === null ? '—' : money(selected.amountMinor, selected.currency), consumptionError: '' }));
+  },
+  closeConsumptionRecord() { return this.closeSheet('consumptionRecord'); },
+  async retryConsumptionRevoke() {
+    const pending = this.data.consumptionRevokePending;
+    if (!pending || this.consumptionBlocked()) return;
+    const selected = this.data.detail?.consumptions?.find(record => record.id === pending.payload.id);
+    if (!selected) { this.setData({ consumptionError: '暂未找到原记录，请刷新后继续核对。' }); return; }
+    this.commitSheet('consumptionRecord', { selectedConsumptionId: selected.id, selectedConsumption: selected,
+      selectedConsumptionAmount: selected.amountMinor === null ? '—' : money(selected.amountMinor, selected.currency) });
+    await this.revokeConsumption();
+  },
+  async revokeConsumption() {
+    const record = this.data.detail?.participation, selected = this.data.detail?.consumptions?.find(row => row.id === this.data.selectedConsumptionId);
+    if (this.consumptionBlocked() || !this.data.showConsumptionRecord || !record || !selected || this.data.consumptionPending) return;
+    if (!this.data.consumptionRevokePending && (selected.reversedAt || record.withdrawnAt || ['received', 'skipped'].includes(record.stage))) return;
+    const fresh = !this.data.consumptionRevokePending;
+    const pending = this.data.consumptionRevokePending || { intentKey: createCommandIntent(), payload: { id: selected.id, expectedVersion: record.version } };
+    if (pending.payload.id !== selected.id) return;
+    this.setData({ consumptionRevokePending: pending, consumptionBaseVersion: pending.payload.expectedVersion, consumptionError: '' });
+    if (!this.persistConsumption()) {
+      this.setData({ ...(fresh ? { consumptionRevokePending: null } : {}), consumptionError: '本机暂存失败，撤销尚未发送。原消费记录保留，请释放存储空间后重试。' });
+      this.syncLeaveAlert(); return;
+    }
+    this.syncLeaveAlert();
+    let revision = getDraftRevision('detail-consumption', record.ownerId, record.id);
+    const sequence = ++this.consumptionSequence,
+      visibility = this.visibilitySequence, load = this.loadSequence;
+    const current = () => !this.disposed && sequence === this.consumptionSequence;
+    this.setData({ busy: true });
+    try {
+      const session = await ensureSession(true);
+      if (!current()) return;
+      if (!this.isForeground() || visibility !== this.visibilitySequence || load !== this.loadSequence) return;
+      if (session.userId !== record.ownerId) throw new Error('身份已变化，请使用原账号核对原操作。');
+      if (!this.persistConsumption()) {
+        this.setData({ ...(fresh ? { consumptionRevokePending: null } : {}), consumptionError: '本机暂存失败，本次撤销尚未发送。原消费记录保留。' });
+        this.syncLeaveAlert(); return;
+      }
+      revision = getDraftRevision('detail-consumption', record.ownerId, record.id);
+      await api.command('consumption.revoke', pending.payload, { intentKey: pending.intentKey,
+        ...(record.version !== pending.payload.expectedVersion || selected.reversedAt || record.withdrawnAt || ['received', 'skipped'].includes(record.stage) ? { replayOnly: true } : {}) });
+      removeDraft('detail-consumption', record.ownerId, record.id, revision);
+      if (!current()) return;
+      this.consumptionDraftFingerprint = '';
+      this.setData({ consumptionRevokePending: null, consumptionError: '', consumptionNotice: '', mutationNotice: '消费撤销已保存。' });
+      this.persistConsumption();
+      if (this.isForeground() && visibility === this.visibilitySequence && load === this.loadSequence) {
+        this.commitSheet(''); this.showPageToast('消费已撤销，历史记录保留', 'success'); await this.load(); this.syncLeaveAlert();
+      }
+    } catch (error) {
+      if (!current()) return;
+      if (['VERSION_CONFLICT', 'INVALID_INPUT', 'FORBIDDEN', 'NOT_FOUND'].includes(errorCode(error))) {
+        this.setData({ consumptionRevokePending: null, consumptionError: '记录已变化，撤销未保存。请读取最新记录后核对。' });
+      } else this.setData({ consumptionError: '撤销结果尚未确认，原操作已保留，请继续核对。' });
+      this.persistConsumption(); this.syncLeaveAlert();
+    } finally { if (current()) this.setData({ busy: false }); }
+  },
+  closeCelebration() { this.setData({ showCelebration: false }); },
+  async register() {
+    const record = this.data.detail?.participation;
+    if (this.actionsBlocked() || !record || !this.data.view?.requiresRegistration || record.withdrawnAt) return;
+    this.setData({ busy: true });
+    try {
+      await api.command('participation.progress', { participationId: record.id, progress: record.progress, registered: true, expectedVersion: record.version });
+      if (this.disposed) return;
+      this.setData({ mutationNotice: '报名状态已保存。' });
+      this.showPageToast('已标记报名', 'success');
+      await this.load();
+    } catch (error) { this.showPageError(error); }
+    finally { if (!this.disposed) this.setData({ busy: false }); }
+  },
+  copyEntry() {
+    const entrance = this.data.view?.activity.entrance;
+    const value = entrance?.instructions || entrance?.url || entrance?.shortLink || entrance?.path || '';
+    if (!value) { this.showPageToast('活动暂未提供入口路径'); return; }
+    return this.switchContext(() => { wx.setClipboardData({ data: value, success: () => this.showPageToast('入口已复制', 'success') }); });
+  },
+  uploadShot() {
+    return this.switchContext(() => { this.commitSheet(''); wx.navigateTo({ url: `/pages/submission-lead/index?bankId=${encodeURIComponent(this.data.view?.activity.bankId || '')}&title=${encodeURIComponent(this.data.view?.activity.title || '')}` }); });
+  },
+  async openShot(event: any) {
+    if (!this.isForeground() || !this.data.detail?.assets.length) return;
+    await this.switchContext(async () => {
+      this.commitSheet('');
+      const load = this.loadSequence, visibility = this.visibilitySequence, sequence = ++this.previewSequence;
+      const shots = this.data.view?.shots.slice() || [], id = String(event.currentTarget.dataset.id || '');
+      const index = shots.findIndex(item => item.id === id);
+      if (index < 0) return;
+      const current = () => this.isForeground() && load === this.loadSequence && visibility === this.visibilitySequence && sequence === this.previewSequence;
+      try {
+        const urls = await api.query('assets.urls', { ids: shots.map(item => item.id) });
+        if (!current()) return;
+        this.setData({ viewerOpen: true, viewerItems: shots.map(item => ({ ...item, url: urls.find(value => value.id === item.id)?.url || item.url })), viewerIndex: index });
+      } catch (error) { if (current()) this.showPageError(error); }
+    });
+  },
+  closeViewer() { this.previewSequence += 1; this.setData({ viewerOpen: false }); },
+  openQuit() {
+    if (this.actionsBlocked() || !this.data.view?.joined) return;
+    return this.switchContext(() => this.commitSheet('quit'));
+  },
+  closeQuit() { return this.closeSheet('quit'); },
+  async confirmQuit() {
+    const record = this.data.detail?.participation;
+    if (this.actionsBlocked() || !this.data.showQuit || !this.data.view?.joined || !record) return;
+    this.setData({ busy: true });
+    try {
+      await api.command('activity.untrack', { participationId: record.id });
+      if (this.disposed) return;
+      const message = this.data.view!.cycle.repeating ? '已退出活动，后续周期不再跟进' : '已退出活动，记录已保留';
+      this.commitSheet('', { mutationNotice: '退出活动已保存。' });
+      this.showPageToast(message, 'success');
+      await this.load();
+    } catch (error) { this.showPageError(error); }
+    finally { if (!this.disposed) this.setData({ busy: false }); }
   },
   openHistory() { return this.switchContext(() => { this.commitSheet(''); wx.navigateTo({ url: `/pages/history/index?activityId=${encodeURIComponent(this.data.activityId)}` }); }); },
   openRules() { return this.switchContext(() => this.commitSheet('rules')); },
@@ -333,7 +750,7 @@ Page({
     });
   },
   openExpected() {
-    if (this.actionsBlocked() || this.data.showExpected || this.data.detail?.participation?.stage !== 'completed' || this.data.view?.benefit.isDiscount) return;
+    if (this.actionsBlocked() || this.data.showExpected || this.data.detail?.participation?.withdrawnAt || this.data.detail?.participation?.stage !== 'completed' || this.data.view?.benefit.isDiscount) return;
     const expectedOn = this.data.detail?.participation?.expectedOn || '';
     return this.switchContext(() => this.commitSheet('expected', { expectedOn, expectedBase: expectedOn, expectedDirty: false, expectedError: '', expectedLatestNote: '' }));
   },
@@ -375,7 +792,7 @@ Page({
   async reminder() {
     if (this.actionsBlocked() || !this.isForeground()) return;
     const record = this.data.detail?.participation;
-    if (!record || ['received', 'skipped'].includes(record.stage) || (record.stage === 'completed' && !record.expectedOn)) return;
+    if (!record || record.withdrawnAt || ['received', 'skipped'].includes(record.stage) || (record.stage === 'completed' && !record.expectedOn)) return;
     if (record.snapshot.rewardKind === 'discount' && record.stage === 'completed') return;
     if (record.stage !== 'completed' && this.deadlineReminderExpired()) { this.clearReminderReadiness(); return; }
     if (this.reminderReadinessIsCurrent()) { await this.authorizeReminder(); return; }

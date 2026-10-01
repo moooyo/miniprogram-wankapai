@@ -1,6 +1,6 @@
 import test, { after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import type { Activity, Actor, ApiEnvelope, ApiRequest, Bill, BillingAccount, Card, Commands, Participation, Reward, Tracking } from '../shared/contracts';
+import type { Activity, Actor, ApiEnvelope, ApiRequest, Bill, BillingAccount, Card, Commands, Consumption, Participation, Reward, Tracking } from '../shared/contracts';
 import { MemoryStore } from '../domain/memory-store';
 import { createService, DomainError } from '../domain/service';
 import { api } from '../miniprogram/services/api';
@@ -93,6 +93,123 @@ function deferred<T>() {
   const promise = new Promise<T>(done => { resolve = done; });
   return { promise, resolve };
 }
+
+function consumptionPayload(expectedVersion = 1): Commands['participation.consume'] {
+  return { participationId: f.ids.participation, amountMinor: 1875, merchant: 'Example Merchant', consumedOn: '2026-09-19', expectedVersion };
+}
+
+test('a persistent consumption intent recovers a lost response and read-only replay without duplicating progress or history', async () => {
+  const payload = consumptionPayload(), options = { intentKey: createCommandIntent() };
+  loseFirstResponse('participation.consume');
+  await assert.rejects(api.command('participation.consume', payload, options), hasCode('NETWORK_ERROR'));
+  await api.command('bill.update', { id: f.ids.bill, paid: true });
+  const confirmed = await api.command('participation.consume', payload, options);
+  const replayed = await api.command('participation.consume', payload, { ...options, replayOnly: true });
+  assert.equal(replayed.id, confirmed.id);
+  const sent = attempts('participation.consume');
+  assert.equal(sent.length, 2);
+  assert.equal(sent[0].requestId, sent[1].requestId);
+  assert.equal(attempts('request.replay')[0].payload.requestId, sent[0].requestId);
+  const rows = await f.store.find<Consumption>('consumptions');
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].id, confirmed.id);
+  assert.equal(rows[0].amountMinor, 1875);
+  assert.equal(rows[0].reversedAt, null);
+  const record = (await f.store.get<Participation>('participations', f.ids.participation))!;
+  assert.equal(record.progress, 1);
+  assert.equal(record.version, 2);
+  assert.equal(record.periodKey, '2026-09');
+  assert.deepEqual(record.snapshot, f.source);
+});
+
+test('a fresh identical consumption form has a distinct request and must pass the current version guard', async () => {
+  const payload = consumptionPayload();
+  const originalIntent = createCommandIntent(), freshIntent = createCommandIntent();
+  const original = await api.command('participation.consume', payload, { intentKey: originalIntent });
+  await assert.rejects(api.command('participation.consume', payload, { intentKey: freshIntent }), hasCode('VERSION_CONFLICT'));
+  const recovered = await api.command('participation.consume', payload, { intentKey: originalIntent });
+  assert.equal(recovered.id, original.id);
+  const sent = attempts('participation.consume');
+  assert.notEqual(sent[0].requestId, sent[1].requestId);
+  assert.equal(sent[0].requestId, sent[2].requestId);
+  assert.deepEqual(sent[0].payload, sent[1].payload);
+  assert.equal((await f.store.find('consumptions')).length, 1);
+  assert.equal((await f.store.get<Participation>('participations', f.ids.participation))?.progress, 1);
+});
+
+test('concurrent copies of a consumption form share one dispatch while a later version creates a second independent row', async () => {
+  const payload = consumptionPayload(), options = { intentKey: createCommandIntent() };
+  const first = api.command('participation.consume', payload, options);
+  const duplicate = api.command('participation.consume', payload, options);
+  assert.equal(first, duplicate);
+  const result = await first;
+  const second = await api.command('participation.consume', consumptionPayload(2), { intentKey: createCommandIntent() });
+  assert.notEqual(result.id, second.id);
+  assert.equal(attempts('participation.consume').length, 2);
+  assert.equal((await f.store.find('consumptions')).length, 2);
+  assert.equal((await f.store.get<Participation>('participations', f.ids.participation))?.progress, 2);
+  assert.equal((await f.store.get<Participation>('participations', f.ids.participation))?.version, 3);
+});
+
+test('an observed consumption reversal retires an older lost-response consume retry for its participation', async () => {
+  const payload = consumptionPayload();
+  loseFirstResponse('participation.consume');
+  await assert.rejects(api.command('participation.consume', payload), hasCode('NETWORK_ERROR'));
+  const detail = await api.query('activity.get', { activityId: f.source.id, participationId: f.ids.participation });
+  assert.equal(detail.consumptions?.length, 1);
+  const row = detail.consumptions![0];
+  await api.command('consumption.revoke', { id: row.id, expectedVersion: 2 });
+  await assert.rejects(api.command('participation.consume', payload), hasCode('VERSION_CONFLICT'));
+  const sent = attempts('participation.consume');
+  assert.notEqual(sent[0].requestId, sent[1].requestId);
+  const record = (await f.store.get<Participation>('participations', f.ids.participation))!;
+  assert.equal(record.progress, 0);
+  assert.equal(record.version, 3);
+  const rows = await f.store.find<Consumption>('consumptions');
+  assert.equal(rows.length, 1);
+  assert.ok(rows[0].reversedAt);
+});
+
+test('a newer consumption retires a lost-response reversal retry through the direct mutation resource mapping', async () => {
+  const created = await api.command('participation.consume', consumptionPayload());
+  const revoke = { id: created.id, expectedVersion: 2 };
+  loseFirstResponse('consumption.revoke');
+  await assert.rejects(api.command('consumption.revoke', revoke), hasCode('NETWORK_ERROR'));
+  const newer = await api.command('participation.consume', consumptionPayload(3));
+  await assert.rejects(api.command('consumption.revoke', revoke), hasCode('VERSION_CONFLICT'));
+  const sent = attempts('consumption.revoke');
+  assert.notEqual(sent[0].requestId, sent[1].requestId);
+  const record = (await f.store.get<Participation>('participations', f.ids.participation))!;
+  assert.equal(record.progress, 1);
+  assert.equal(record.version, 4);
+  const rows = await f.store.find<Consumption>('consumptions');
+  assert.equal(rows.length, 2);
+  assert.ok(rows.find(row => row.id === created.id)?.reversedAt);
+  assert.equal(rows.find(row => row.id === newer.id)?.reversedAt, null);
+});
+
+test('a persistent reversal intent recovers its original result without undoing the same consumption twice', async () => {
+  const created = await api.command('participation.consume', consumptionPayload());
+  const payload = { id: created.id, expectedVersion: 2 }, options = { intentKey: createCommandIntent() };
+  loseFirstResponse('consumption.revoke');
+  await assert.rejects(api.command('consumption.revoke', payload, options), hasCode('NETWORK_ERROR'));
+  const confirmed = await api.command('consumption.revoke', payload, options);
+  const replayed = await api.command('consumption.revoke', payload, { ...options, replayOnly: true });
+  assert.equal(confirmed.id, f.ids.participation);
+  assert.equal(confirmed.version, 3);
+  assert.deepEqual(replayed, confirmed);
+  const sent = attempts('consumption.revoke');
+  assert.equal(sent.length, 2);
+  assert.equal(sent[0].requestId, sent[1].requestId);
+  assert.equal(attempts('request.replay')[0].payload.requestId, sent[0].requestId);
+  const record = (await f.store.get<Participation>('participations', f.ids.participation))!;
+  assert.equal(record.progress, 0);
+  assert.equal(record.version, 3);
+  const rows = await f.store.find<Consumption>('consumptions');
+  assert.equal(rows.length, 1);
+  assert.ok(rows[0].reversedAt);
+  assert.equal((await f.store.find('audit_events')).length, 4);
+});
 
 test('a confirmed bill reversal retires an earlier lost-response intent before the same paid payload is used again', async () => {
   const paid = { id: f.ids.bill, paid: true };

@@ -1,11 +1,13 @@
 import type { Commands, Entitlement, EntitlementDetail, EntitlementList, EntitlementUsage } from '../../../shared/contracts';
 import { api, ensureSession } from '../../services/api';
-import { EntitlementRow, EntitlementScope, currentEntitlement, entitlementRow, filterEntitlements, greyTransferQualification, remainingUses, reservationLabel, customerScopeLabel, validateUsage } from '../../services/entitlement-view';
+import { banks } from '../../../shared/catalog';
+import { EntitlementRow, EntitlementScope, countedEntitlement, currentEntitlement, entitlementRow, filterEntitlements, greyTransferQualification, remainingUses, reservationLabel, customerScopeLabel, validateUsage } from '../../services/entitlement-view';
 
 type ValueEvent = { detail: { value: string } };
 type ActionEvent = { currentTarget: { dataset: { id?: string; value?: string } } };
 type SheetMode = '' | 'use' | 'history';
 type UsageRow = EntitlementUsage & { reversed: boolean };
+type BenefitRow = EntitlementRow & { logo: string; bankShort: string; endsLabel: string; meter: { index: number; available: boolean }[] };
 
 function messageOf(error: unknown): string { return error instanceof Error ? error.message : '暂时无法完成操作，请重试。'; }
 function codeOf(error: unknown): string { return (error as { code?: string } | null)?.code || ''; }
@@ -13,10 +15,10 @@ function codeOf(error: unknown): string { return (error as { code?: string } | n
 Page({
   data: {
     loading: true, refreshing: false, failed: false, outdated: false, refreshError: '', demo: false, ownerId: '',
-    raw: null as EntitlementList | null, rows: [] as EntitlementRow[], totalCount: 0, validCount: 0, archivedCount: 0,
+    raw: null as EntitlementList | null, rows: [] as BenefitRow[], totalCount: 0, validCount: 0, archivedCount: 0,
     scope: 'valid' as EntitlementScope, kind: 'all', search: '', filtered: false, expandedId: '',
     scopes: [{ value: 'valid', label: '当前可用' }, { value: 'all', label: '全部权益' }, { value: 'archived', label: '已归档' }],
-    kinds: [{ value: 'all', label: '全部' }, { value: 'lounge', label: '贵宾厅' }, { value: 'health_check', label: '体检' }, { value: 'other', label: '其他' }],
+    kinds: [{ value: 'all', label: '全部' }, { value: 'lounge', label: '贵宾厅' }, { value: 'delay_insurance', label: '延误险' }, { value: 'airport_transfer', label: '接送机' }, { value: 'health_check', label: '体检' }, { value: 'car_wash', label: '洗车' }, { value: 'points', label: '积分' }, { value: 'other', label: '其他' }],
     sheet: '' as SheetMode, selectedId: '', selected: null as Entitlement | null, selectedRow: null as EntitlementRow | null,
     selectedFresh: false, formInitialized: false, detailLoading: false, detailError: '', usages: [] as UsageRow[],
     quantityInput: '1', usedOn: '', note: '', loungeIndex: 0, loungeNames: [] as string[], loungeIds: [] as string[],
@@ -33,6 +35,7 @@ Page({
 
   onLoad(options: { id?: string; loungeId?: string; record?: string }) {
     if (options.id && options.record === '1') this.routeRecord = { id: options.id, loungeId: options.loungeId || '' };
+    else if (options.id) this.setData({ expandedId: options.id, scope: 'all' });
   },
   async onShow() {
     if (this.data.busy || this.data.confirming || this.data.pendingUse) return;
@@ -77,7 +80,11 @@ Page({
   applyFilters() {
     const raw = this.data.raw;
     if (!raw) return;
-    this.setData({ rows: filterEntitlements(raw.items, raw.today, this.data.scope, this.data.kind, this.data.search).map(item => entitlementRow(item, raw.cards, raw.today)),
+    this.setData({ rows: filterEntitlements(raw.items, raw.today, this.data.scope, this.data.kind, this.data.search).map(item => {
+      const card = raw.cards.find(value => value.id === item.cardId), bank = banks.find(value => value.id === card?.bankId);
+      return { ...entitlementRow(item, raw.cards, raw.today), logo: bank?.logo || '', bankShort: bank?.shortName || '', endsLabel: item.endsOn,
+        meter: Array.from({ length: Math.min(item.totalUses, 12) }, (_, index) => ({ index, available: index < Math.ceil((item.totalUses - item.usedUses) / item.totalUses * Math.min(item.totalUses, 12)) })) };
+    }),
       filtered: this.data.kind !== 'all' || !!this.data.search.trim() });
   },
   changeScope(event: ActionEvent) {
@@ -120,7 +127,7 @@ Page({
   async openSelection(id: string, sheet: SheetMode, loungeId = '') {
     if (!id || this.disposed || this.data.busy || this.data.detailLoading || this.data.confirming || this.data.pendingUse) return;
     const item = this.data.raw?.items.find(value => value.id === id);
-    if (sheet === 'use' && item && !currentEntitlement(item, this.data.raw!.today)) {
+    if (sheet === 'use' && item && (!countedEntitlement(item) || !currentEntitlement(item, this.data.raw!.today))) {
       this.setData({ status: '这项权益当前不可用。可以查看使用记录，或编辑权益资料。' }); return;
     }
     this.pendingUsePayload = null;
@@ -222,7 +229,7 @@ Page({
   async submitUsage() {
     const item = this.data.selected, raw = this.data.raw;
     if (!item || !raw || this.disposed || this.data.busy || this.data.confirming || this.data.detailLoading) return;
-    if (!this.data.pendingUse && (!this.data.selectedFresh || this.data.outdated || this.data.refreshing || !currentEntitlement(item, raw.today))) return;
+    if (!this.data.pendingUse && (!this.data.selectedFresh || this.data.outdated || this.data.refreshing || !countedEntitlement(item) || !currentEntitlement(item, raw.today))) return;
     const values = validateUsage(item, raw.today, this.data.quantityInput, this.data.usedOn);
     if (!this.data.pendingUse && (values.quantityError || values.dateError)) {
       this.setData({ quantityError: values.quantityError, dateError: values.dateError }); return;
@@ -259,7 +266,7 @@ Page({
   async undoUsage(event: ActionEvent) {
     const item = this.data.selected, id = event.currentTarget.dataset.id;
     const usage = this.data.usages.find(value => value.id === id);
-    if (!item || !usage || usage.reversed || !this.canModify() || !this.data.selectedFresh) return;
+    if (!item || !countedEntitlement(item) || !usage || usage.reversed || !this.canModify() || !this.data.selectedFresh) return;
     this.setData({ confirming: true });
     let confirmed = false;
     try {

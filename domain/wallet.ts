@@ -213,12 +213,21 @@ export async function removeCard(ctx: Context, payload: Commands['card.remove'])
 
 export async function updateBill(ctx: Context, payload: Commands['bill.update']): Promise<MutationResult> {
   const bill = await ctx.owned<Bill>('bills', validId(payload?.id, 'id'));
-  requireValue(payload.dueOn !== undefined || payload.paid !== undefined, 'INVALID_INPUT', '请选择要修改的账单内容');
+  requireValue(payload.dueOn !== undefined || payload.paid !== undefined || payload.amountMinor !== undefined || payload.currency !== undefined,
+    'INVALID_INPUT', '请选择要修改的账单内容');
   requireValue(payload.paid === undefined || typeof payload.paid === 'boolean', 'INVALID_INPUT', '还款状态无效', 'paid');
+  if (payload.amountMinor !== undefined) {
+    requireValue(Number.isSafeInteger(payload.amountMinor) && payload.amountMinor >= 0 && payload.amountMinor <= 1e11,
+      'INVALID_INPUT', '请填写有效账单金额', 'amountMinor');
+  }
+  requireValue(payload.currency === undefined || ['CNY', 'HKD', 'MOP'].includes(payload.currency), 'INVALID_INPUT', '请选择有效币种', 'currency');
+  const amountMinor = payload.amountMinor === undefined ? bill.amountMinor : payload.amountMinor;
+  requireValue(payload.currency === undefined || amountMinor !== undefined, 'INVALID_INPUT', '请先填写账单金额，再选择币种', 'currency');
+  const currency = amountMinor === undefined ? bill.currency : payload.currency || bill.currency || 'CNY';
   const dueOn = payload.dueOn === undefined ? bill.dueOn : checkDueOn(payload.dueOn, bill.statementOn);
   const paidAt = payload.paid === undefined ? bill.paidAt : payload.paid ? bill.paidAt || ctx.now : null;
-  if (dueOn !== bill.dueOn || paidAt !== bill.paidAt) {
-    const updated: Bill = { ...bill, dueOn, paidAt };
+  if (dueOn !== bill.dueOn || paidAt !== bill.paidAt || amountMinor !== bill.amountMinor || currency !== bill.currency) {
+    const updated: Bill = { ...bill, dueOn, paidAt, ...(amountMinor === undefined ? {} : { amountMinor, currency }) };
     await ctx.store.set('bills', bill.id, updated);
     await ctx.audit(bill.id, 'bill.updated', bill, updated);
   }

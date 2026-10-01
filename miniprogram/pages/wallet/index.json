@@ -1,1 +1,9 @@
-{"navigationBarTitleText":"卡包","enablePullDownRefresh":true}
+{
+  "usingComponents": {
+    "app-sheet": "/components/app-sheet/index",
+    "design-nav": "/components/design-nav/index"
+  },
+  "enablePullDownRefresh": true,
+  "navigationBarTitleText": "卡与权益",
+  "navigationStyle": "custom"
+}

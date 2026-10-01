@@ -1,5 +1,10 @@
 {
   "navigationBarTitleText": "活动",
+  "navigationStyle": "custom",
   "enablePullDownRefresh": true,
-  "usingComponents": { "app-sheet": "/components/app-sheet/index" }
+  "usingComponents": {
+    "app-sheet": "/components/app-sheet/index",
+    "design-nav": "/components/design-nav/index",
+    "screenshot-viewer": "/components/screenshot-viewer/index"
+  }
 }

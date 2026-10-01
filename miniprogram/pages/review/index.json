@@ -1,1 +1,9 @@
-{"navigationBarTitleText":"活动审核"}
+{
+  "navigationBarTitleText": "活动审核",
+  "navigationStyle": "custom",
+  "usingComponents": {
+    "design-nav": "/components/design-nav/index",
+    "app-sheet": "/components/app-sheet/index",
+    "screenshot-viewer": "/components/screenshot-viewer/index"
+  }
+}

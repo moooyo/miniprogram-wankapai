@@ -1,7 +1,17 @@
-.web-entry-page { max-width:720px; margin:0 auto; padding:24px 20px calc(32px + env(safe-area-inset-bottom)); }
-.entry-state { padding:24px 20px; border-radius:12px; background:var(--surface,#fff); }
-.entry-title { display:block; font-size:22px; font-weight:600; line-height:1.4; }
-.entry-copy { display:block; margin:12px 0 20px; color:var(--muted,#626f82); font-size:15px; line-height:1.7; }
-.entry-url { display:block; padding:12px; margin-bottom:20px; background:var(--page,#f4f7fb); border-radius:8px; color:var(--ink,#172230); font-size:14px; line-height:1.7; word-break:break-all; }
-.entry-state button { width:100%; min-height:48px; margin-top:12px; }
-.back-button { background:transparent; color:var(--brand,#1f61d8); }
+page{background:#F3F6FB;color:#0F1B2D}
+.web-entry-page{padding:4px 16px calc(28px + env(safe-area-inset-bottom));font-family:'PingFang SC','Microsoft YaHei',sans-serif}
+.entry-state{padding:24px 20px;background:#FFFFFF;border:1px solid #E3E9F2;border-radius:20px}
+.entry-symbol{position:relative;width:48px;height:48px;margin-bottom:16px;border-radius:14px;background:#E6EEFC}
+.link-line{position:absolute;left:11px;top:13px;width:16px;height:10px;border:2px solid #1F61D8;border-radius:6px;transform:rotate(-40deg)}
+.link-line.second{left:21px;top:24px}
+.entry-title{display:block;font-size:20px;font-weight:600;line-height:1.3}
+.entry-copy{display:block;margin:10px 0 16px;font-size:13px;color:#3F4D63;line-height:1.65}
+.entry-url{display:block;margin-bottom:16px;padding:12px 14px;border-radius:12px;background:#EEF3FA;color:#3F4D63;font-family:'DM Mono',monospace;font-size:12px;line-height:1.6;word-break:break-all}
+.entry-state button{display:flex;align-items:center;justify-content:center;width:100%;min-height:48px;margin:10px 0 0;padding:0 16px;border-radius:14px;font-size:15px;font-weight:600;line-height:1.5}
+.entry-state .primary{background:#1F61D8;color:#FFFFFF;border:0}
+.entry-state .secondary{background:#E6EEFC;color:#1A56C4;border:0}
+.entry-state .back-button{background:transparent;color:#5E6E84;font-size:14px;font-weight:500}
+.entry-state button[disabled]{background:#C5D0DF;color:#FFFFFF}
+.entry-state button::after{border:0}
+.tap-primary{background:#1A56C4!important}
+.tap-soft{background:#F4F7FC!important}

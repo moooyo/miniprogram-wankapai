@@ -1,1 +1,9 @@
-{"navigationBarTitleText":"分享活动","disableScroll":false}
+{
+  "navigationBarTitleText": "分享活动",
+  "navigationStyle": "custom",
+  "disableScroll": false,
+  "usingComponents": {
+    "design-nav": "/components/design-nav/index",
+    "screenshot-viewer": "/components/screenshot-viewer/index"
+  }
+}

@@ -1,5 +1,12 @@
 # Third-Party Notices
 
+## DM Mono typography
+
+- Source: https://github.com/google/fonts/tree/main/ofl/dmmono
+- Files: miniprogram/assets/fonts/DMMono-Regular.ttf and DMMono-Medium.ttf
+- License: SIL Open Font License 1.1, included in miniprogram/assets/fonts/OFL.txt.
+- The bundled font sources are used by wx.loadFontFace for the handoff's numeric typography.
+
 ## Bank logo assets
 
 - Source: https://github.com/icongo/bank-logos
@@ -34,6 +41,8 @@ SOFTWARE.
 ```
 
 ## Lucide navigation icons
+
+The four active navigation entries now use the simple line shapes supplied in the activity-feature design handoff. They are rasterized by scripts/generate-design-icons.mjs at 48 by 48 pixels, using #5E6E84 and #1F61D8. The legacy, unused rewards icon retains the Lucide notice below.
 
 - Source: https://lucide.dev/ and https://github.com/lucide-icons/lucide
 - Package: lucide@1.17.0

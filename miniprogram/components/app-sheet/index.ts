@@ -42,7 +42,7 @@ function updateTabBar(owner: object, visible: boolean) {
 
 Component({
   options: { multipleSlots: true },
-  properties: { show: { type: Boolean, value: false }, title: { type: String, value: '' }, dismissible: { type: Boolean, value: true }, contentState: { type: Array, value: [] }, scrollIntoView: { type: String, value: '' } },
+  properties: { show: { type: Boolean, value: false }, title: { type: String, value: '' }, dismissible: { type: Boolean, value: true }, contentState: { type: Array, value: [] }, scrollIntoView: { type: String, value: '' }, fullScreen:{type:Boolean,value:false} },
   data: { bodyHeight: 200 },
   observers: {
     show(visible: boolean) {
@@ -50,7 +50,7 @@ Component({
       updateTabBar(this, visible);
       if (visible) wx.nextTick(() => this.measure());
     },
-    'contentState.**, title'() { if (this.data.show) wx.nextTick(() => this.measure()); },
+    'contentState.**, title, fullScreen'() { if (this.data.show) wx.nextTick(() => this.measure()); },
   },
   lifetimes: {
     attached() {
@@ -87,18 +87,18 @@ Component({
       if (!this.data.show) return;
       const revision = (measurementRevisions.get(this) || 0) + 1;
       measurementRevisions.set(this, revision);
-      const info=wx.getWindowInfo?wx.getWindowInfo():wx.getSystemInfoSync();
+      const info=wx.getWindowInfo();
       const query = this.createSelectorQuery();
       query.selectViewport().boundingClientRect();
       query.select('.sheet-content').boundingClientRect();
-      query.select('.sheet-head').boundingClientRect();
+      query.select(this.data.fullScreen ? '.sheet-head-full' : '.sheet-head').boundingClientRect();
       query.exec(results => {
         if (!this.data.show || measurementRevisions.get(this) !== revision) return;
         const [viewport, content, header] = results;
         if (!content) return;
         const height = viewport?.height || info.windowHeight;
         const safeBottom = info.safeArea ? Math.max(0, info.screenHeight - info.safeArea.bottom) : 0;
-        this.setData({ bodyHeight: Math.min(content.height, Math.max(80, height * .88 - (header?.height || 60) - safeBottom)) });
+        this.setData({ bodyHeight:this.data.fullScreen ? Math.max(80,height - (header?.height || 93) - safeBottom) : Math.min(content.height, Math.max(80, height * .88 - (header?.height || 60) - safeBottom)) });
       });
     },
   },

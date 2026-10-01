@@ -1,5 +1,11 @@
 export type Currency = 'CNY' | 'HKD' | 'MOP';
 export type Frequency = 'once' | 'monthly' | 'quarterly' | 'yearly';
+export type RewardKind = 'cashback' | 'discount' | 'voucher' | 'points' | 'gift';
+export type ActivityCycle =
+  | { t: 'once'; start: string; end: string }
+  | { t: 'week'; weekday: 0 | 1 | 2 | 3 | 4 | 5 | 6; days?: number[] }
+  | { t: 'month'; day: number }
+  | { t: 'custom'; n: number; unit: 'day' | 'week' | 'month'; anchor: string };
 export type Network = 'visa' | 'mastercard' | 'unionpay' | 'amex' | 'other';
 export type Stage = 'available' | 'registered' | 'in_progress' | 'completed' | 'received' | 'skipped';
 export type SubmissionStatus = 'pending' | 'returned' | 'published';
@@ -25,13 +31,15 @@ export interface ActivityDraft {
   cardKind: 'credit' | 'debit' | 'any';
   cardDescription: string;
   frequency: Frequency;
+  cycle?: ActivityCycle;
   startsOn: string;
   endsOn: string;
   target: number;
   unit: string;
   currency: Currency;
   rewardMinor: number;
-  rewardKind: 'cashback' | 'discount';
+  // Point values use hundredths, consistent with monetary minor-unit storage.
+  rewardKind: RewardKind;
   scope: 'user' | 'card';
   requiresRegistration: boolean;
   requiresInvitation: boolean;
@@ -50,6 +58,7 @@ export interface ActivityLead {
   sourceUrl: string;
   sourceNote: string;
   imageIds: string[];
+  rules?: Partial<ActivityDraft>;
 }
 export interface Submission {
   id: string; ownerId: string; draft: ActivityDraft | null; lead?: ActivityLead; status: SubmissionStatus;
@@ -60,7 +69,7 @@ export interface Card {
   kind: 'credit' | 'debit'; nickname: string; billingAccountId?: string;
   createdAt: string; archivedAt?: string;
 }
-export type EntitlementKind = 'lounge' | 'health_check' | 'other';
+export type EntitlementKind = 'lounge' | 'health_check' | 'delay_insurance' | 'airport_transfer' | 'car_wash' | 'points' | 'other';
 // Grey transferability records unofficial reports that still require verification.
 export type Transferability = 'allowed' | 'grey' | 'not_allowed';
 export interface LoungeAccess {
@@ -74,6 +83,7 @@ export interface LoungeAccess {
 export interface EntitlementDraft {
   title: string; kind: EntitlementKind; cardId: string; provider: string; totalUses: number; initialUsed: number;
   startsOn: string; endsOn: string; transferability: Transferability; transferNote: string; notes: string; lounges: LoungeAccess[];
+  description?: string; pointsBalance?: number; loungeProgram?: 'dragon' | 'pp' | 'plaza' | 'unionpay' | 'other';
 }
 export interface Entitlement extends EntitlementDraft {
   id: string; ownerId: string; usedUses: number; version: number; createdAt: string; updatedAt: string; archivedAt: string | null;
@@ -92,10 +102,12 @@ export interface BillingAccount {
 export interface Bill {
   id: string; ownerId: string; billingAccountId: string; periodKey: string;
   statementOn: string; dueOn: string; paidAt: string | null;
+  amountMinor?: number; currency?: Currency;
 }
 export interface Tracking {
   id: string; ownerId: string; activityId: string; cardId?: string;
   scopeKey: string; enabled: boolean; createdAt: string;
+  withdrawnAt?: string | null;
 }
 export interface Participation {
   id: string; ownerId: string; activityId: string; activityRevision: number;
@@ -104,8 +116,14 @@ export interface Participation {
   registeredAt: string | null; startedAt: string | null; completedAt: string | null;
   expectedOn: string | null; receivedOn: string | null; receivedMinor: number | null;
   beforeCompletion?: { stage: Stage; progress: number };
+  completionSource?: 'consumption';
   beforeSkip?: { stage: Stage; progress: number };
+  withdrawnAt?: string | null;
   version: number; createdAt: string; updatedAt: string;
+}
+export interface Consumption {
+  id: string; ownerId: string; participationId: string; amountMinor: number | null; currency: Currency;
+  merchant: string; consumedOn: string; progressDelta: number; reversedAt: string | null; createdAt: string;
 }
 export interface Reward {
   id: string; ownerId: string; participationId: string; title: string; bankId: string;
@@ -115,7 +133,11 @@ export interface Reward {
 export interface Asset {
   id: string; ownerId: string; fileId: string; cloudPath: string; size: number;
   mime: string; status: 'pending' | 'approved'; createdAt: string;
+  label?: string; uploader?: string;
 }
+export interface RecognitionRegion { field: string; label: string; x: number; y: number; width: number; height: number; }
+export interface AssetRecognition { assetId: string; fields: Partial<ActivityDraft>; regions: RecognitionRegion[]; recognized: boolean; }
+export interface RecognitionResult { items: AssetRecognition[]; demo: boolean; }
 export interface AuditEvent { id: string; ownerId: string; entityId: string; action: string; at: string; before?: unknown; after?: unknown; }
 export interface ReminderPreference { ownerId: string; newActivities: boolean; deadlines: boolean; rewards: boolean; repayments: boolean; }
 export interface ReminderJob {
@@ -125,11 +147,12 @@ export interface ReminderJob {
   attempts: number; updatedAt: string; leaseUntil?: string; leaseToken?: string; sentAt?: string; authorizedAt?: string; error?: string; grantEntityId?: string;
 }
 export interface Session { userId: string; isModerator: boolean; today: string; month: string; demo: boolean; }
-export interface PageResult<T> { items: T[]; nextCursor: string | null; }
-export interface ActivityItem { activity: Activity; participation?: Participation; eligible: boolean; }
+export interface PageResult<T> { items: T[]; nextCursor: string | null; total?: number; }
+export interface ActivityItem { activity: Activity; participation?: Participation; tracking?: Tracking | null; eligible: boolean; }
 export interface Detail {
   activity: Activity; participation: Participation | null; tracking: Tracking | null;
   history: Participation[]; audit: AuditEvent[]; assets: Asset[]; eligible: boolean;
+  consumptions?: Consumption[];
 }
 export interface Dashboard { today: string; tasks: Participation[]; pendingRewards: Participation[]; bills: Bill[]; accounts: BillingAccount[]; cards?: Card[]; }
 export interface Wallet { cards: Card[]; accounts: BillingAccount[]; bills: Bill[]; }
@@ -156,11 +179,14 @@ export interface Queries {
   'preferences.get': { input: Record<string, never>; output: ReminderPreference };
   'assets.get': { input: { ids: string[] }; output: Asset[] };
   'assets.urls': { input: { ids: string[] }; output: { id: string; url: string }[] };
+  'assets.recognize': { input: { ids: string[] }; output: RecognitionResult };
 }
 export interface Commands {
   'activity.join': { activityId: string; cardId?: string };
   'activity.untrack': { participationId: string };
   'participation.progress': { participationId: string; progress: number; registered: boolean; expectedVersion?: number };
+  'participation.consume': { participationId: string; amountMinor?: number; merchant?: string; consumedOn: string; progressDelta?: number; expectedVersion: number };
+  'consumption.revoke': { id: string; expectedVersion: number };
   'participation.complete': { activityId?: string; participationId?: string; cardId?: string };
   'participation.undoComplete': { participationId: string };
   'participation.skip': { participationId: string; skipped: boolean };
@@ -173,7 +199,7 @@ export interface Commands {
   'entitlement.use': { id: string; quantity: number; usedOn: string; note?: string; loungeId?: string; expectedVersion: number };
   'entitlement.undo': { id: string; expectedVersion: number };
   'entitlement.archive': { id: string; archived: boolean; expectedVersion: number };
-  'bill.update': { id: string; dueOn?: string; paid?: boolean };
+  'bill.update': { id: string; dueOn?: string; paid?: boolean; amountMinor?: number; currency?: Currency };
   'submission.save': { id?: string; draft: ActivityDraft; expectedVersion?: number };
   'submission.lead.save': { id?: string; lead: ActivityLead; expectedVersion?: number };
   'submission.review': { id: string; decision: 'publish' | 'return'; draft?: ActivityDraft; reviewNote?: string; sourceVerified?: boolean; expectedVersion?: number };

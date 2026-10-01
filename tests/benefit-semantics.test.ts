@@ -13,6 +13,7 @@ import { benefitCopy, BenefitKind } from '../miniprogram/services/benefit-copy';
 import * as format from '../miniprogram/services/format';
 import * as cardLabels from '../miniprogram/services/card-labels';
 import * as entrance from '../miniprogram/services/entrance';
+import * as activityDesign from '../miniprogram/services/activity-design';
 
 function activity(id: string, kind: BenefitKind, currency: 'CNY' | 'HKD' = 'CNY'): Activity {
   return {
@@ -84,6 +85,7 @@ function controller(name: string, participation = record('discount')) {
       if (module.endsWith('/calendar')) return { periodFor };
       if (module.endsWith('/card-labels')) return cardLabels;
       if (module.endsWith('/entrance')) return entrance;
+      if (module.endsWith('/activity-design')) return activityDesign;
       if (module.endsWith('/navigation')) return {
         navigateBackOr() {},
         backToActivity(activityId: string, participationId: string) { returns.push({ activityId, participationId }); },

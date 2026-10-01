@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { Activity, Bill, BillingAccount, Card, Participation, ReminderJob, ReminderPreference } from '../../shared/contracts';
+import { Activity, Bill, BillingAccount, Card, Participation, ReminderJob, ReminderPreference, Tracking } from '../../shared/contracts';
 import { addDays, todayCN } from '../../domain/calendar';
 import { Store } from '../../domain/store';
 import { ReminderConfiguration, ReminderTemplate } from './configuration';
@@ -63,6 +63,10 @@ async function candidateIsCurrent(store: Store, job: Candidate, today: string): 
   }
   const record = await store.get<Participation>('participations', job.entityId);
   if (!record || record.ownerId !== job.ownerId) return false;
+  const trackings = await store.find<Tracking>('trackings', { where: [
+    { field: 'ownerId', op: 'eq', value: job.ownerId }, { field: 'activityId', op: 'eq', value: record.activityId }, { field: 'scopeKey', op: 'eq', value: record.scopeKey },
+  ] });
+  if (trackings.some(tracking => !tracking.enabled) || (!trackings.length && record.withdrawnAt)) return false;
   return job.kind === 'deadline'
     ? unfinished(record) && record.endsOn === job.dueOn && within(today, record.endsOn, 3)
     : record.stage === 'completed' && record.expectedOn === job.dueOn && job.dueOn <= today;
@@ -70,10 +74,11 @@ async function candidateIsCurrent(store: Store, job: Candidate, today: string): 
 
 async function dueCandidates(store: Store, today: string): Promise<Candidate[]> {
   const output: Candidate[] = [];
-  const [preferences, records, bills, accounts, cards, activities] = await Promise.all([
+  const [preferences, records, bills, accounts, cards, activities, trackings] = await Promise.all([
     store.find<ReminderPreference>('preferences'), store.find<Participation>('participations'),
     store.find<Bill>('bills'), store.find<BillingAccount>('billing_accounts'),
     store.find<Card>('cards'), store.find<Activity>('activities', { where: [{ field: 'status', op: 'eq', value: 'published' }] }),
+    store.find<Tracking>('trackings'),
   ]);
   const prefs = new Map(preferences.map(preference => [preference.ownerId, preference]));
   const accountById = new Map(accounts.map(account => [account.id, account]));
@@ -90,6 +95,8 @@ async function dueCandidates(store: Store, today: string): Promise<Candidate[]> 
     }
   }
   for (const record of records) {
+    const tracking = trackings.find(row => row.ownerId === record.ownerId && row.activityId === record.activityId && row.scopeKey === record.scopeKey);
+    if (tracking ? !tracking.enabled : record.withdrawnAt) continue;
     const preference = prefs.get(record.ownerId);
     const base = { ownerId: record.ownerId, entityId: record.id, title: record.snapshot.title, page: `pages/detail/index?participationId=${encodeURIComponent(record.id)}` };
     if (preference?.deadlines && unfinished(record) && within(today, record.endsOn, 3)) output.push({ ...base, kind: 'deadline', dueOn: record.endsOn });

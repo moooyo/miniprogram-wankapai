@@ -7,6 +7,10 @@ import ts from 'typescript';
 import * as catalog from '../shared/catalog';
 import * as validation from '../domain/validation';
 import * as entrance from '../miniprogram/services/entrance';
+import * as activityCycle from '../shared/activity-cycle';
+import * as recognitionForm from '../miniprogram/services/recognition-form';
+import * as activityDesign from '../miniprogram/services/activity-design';
+import * as reviewForm from '../miniprogram/services/review-form';
 import type { ActivityDraft, ApiRequest, Submission } from '../shared/contracts';
 import { MemoryStore } from '../domain/memory-store';
 import { createService } from '../domain/service';
@@ -113,6 +117,10 @@ function harness(route: string, options: { query?: (action: string, payload: any
     '../../runtime-config': { default: options.settings || { webViewEnabled: false, allowedWebViewHosts: [] } },
     '../../../shared/catalog': catalog,
     '../../../domain/validation': validation,
+    '../../../shared/activity-cycle': activityCycle,
+    '../../services/recognition-form': recognitionForm,
+    '../../services/activity-design': activityDesign,
+    '../../services/review-form': reviewForm,
     '../../services/format': { showError: () => effects.push('showError') },
     '../../services/card-labels': {},
     '../../services/benefit-copy': {},
@@ -297,11 +305,11 @@ test('sheet content changes grow and shrink its viewport after an asynchronous r
   assert.equal(instance.data.bodyHeight, 72);
   contentHeight = 1600;
   instance.data.contentState = [false, Array.from({ length: 30 }, (_, id) => ({ id }))];
-  definition.observers['contentState.**, title'].call(instance);
+  definition.observers['contentState.**, title, fullScreen'].call(instance);
   assert.equal(instance.data.bodyHeight, 518);
   contentHeight = 110;
   instance.data.contentState = [false, []];
-  definition.observers['contentState.**, title'].call(instance);
+  definition.observers['contentState.**, title, fullScreen'].call(instance);
   assert.equal(instance.data.bodyHeight, 110);
   assert.deepEqual(calls, ['hide']);
 });
@@ -1260,7 +1268,7 @@ for (const route of ['submissions', 'review']) {
     const styles = readFileSync(`miniprogram/pages/${route}/index.wxss`, 'utf8');
     const listClass = route === 'review' ? 'review-list' : 'submission-list';
     assert.ok(markup.includes(`class="${listClass} {{!sessionVerified ? 'is-session-pending' : ''}}" aria-hidden="{{!sessionVerified}}"`));
-    assert.ok(styles.includes(`.${listClass}.is-session-pending{visibility:hidden}`));
+    assert.match(styles, new RegExp(`\\.${listClass}\\.is-session-pending\\s*\\{\\s*visibility\\s*:\\s*hidden\\s*;?\\s*\\}`));
     assert.ok(markup.includes('重新核实'));
     assert.ok(markup.includes('核实通过后显示投稿'));
   });

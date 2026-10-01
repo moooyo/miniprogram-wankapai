@@ -28,6 +28,10 @@ for(const file of await files(client)){
   if(file.endsWith('.wxml')&&relative.startsWith(`pages${path.sep}`)&&!relative.startsWith(`pages${path.sep}web-entry`)){
     const markup=await readFile(file,'utf8');
     await writeFile(target,`<demo-notice />\n${markup}\n<privacy-gate />\n`);
+  }else if(file.endsWith('.json')&&relative.startsWith(`pages${path.sep}`)&&!relative.startsWith(`pages${path.sep}web-entry`)){
+    const configuration=JSON.parse(await readFile(file,'utf8'));
+    configuration.usingComponents={...configuration.usingComponents,'demo-notice':'/components/demo-notice/index','privacy-gate':'/components/privacy-gate/index'};
+    await writeFile(target,JSON.stringify(configuration,null,2)+'\n');
   }else await cp(file,target);
 }
 const sharedModules = new Map([

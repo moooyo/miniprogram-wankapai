@@ -1,4 +1,5 @@
-<view class="entry-page">
+<design-nav title="{{(isEditing ? benefit.editTitle : benefit.recordAction) || ''}}" back custom-back="{{true}}" bindback="back" />
+<view class="entry-page"><view class="entry-panel">
   <view wx:if="{{loading}}" class="entry-state" role="status">正在读取活动…</view>
   <view wx:elif="{{loadError}}" class="entry-state">
     <view class="entry-error">{{loadError}}</view>
@@ -21,9 +22,10 @@
       <view>原金额和日期已锁定。{{pendingReplayOnly ? '核对只查询原请求结果，不会写入新一期。暂未查到结果时请保留草稿，稍后再次核对。' : '重试会继续核对同一次保存，不会重复新增。'}}</view>
     </view>
     <view wx:elif="{{targetReviewRequired}}" class="entry-notice" role="status">
-      <view>请确认草稿的活动归属期</view>
+      <view>{{unitReviewRequired ? '请核对草稿的奖励单位' : '请确认草稿的活动归属期'}}</view>
+      <view wx:if="{{unitReviewRequired}}">原草稿为{{draftUnitLabel}}，当前活动为{{currentUnitLabel}}。确认后将按当前单位记录数值「{{amountInput}}」，请核对并修改后再保存。</view>
       <view>金额和实际日期已保留。实际到账月份不能用来判断活动归属期。当前可应用到：{{currentPeriodText}}{{currentTarget.participationId ? '的已有记录' : '的新记录'}}。</view>
-      <button class="entry-secondary" bindtap="confirmDraftTarget" disabled="{{busy || reloading || dateRefreshing || !currentTarget}}">确认应用到{{currentPeriodText}}</button>
+      <button class="entry-secondary" bindtap="confirmDraftTarget" disabled="{{busy || reloading || dateRefreshing || !currentTarget}}">{{unitReviewRequired ? '确认使用当前奖励单位' : '确认应用到' + currentPeriodText}}</button>
     </view>
     <view wx:if="{{!allowed && !pendingCreation}}" class="entry-notice">本期尚未开始或已标记不参与，请返回活动详情确认记录。</view>
     <view wx:if="{{!pendingCreation && (conflict || reapplyRequired)}}" id="record-conflict" class="entry-notice">
@@ -34,11 +36,12 @@
     <view class="entry-field" id="amount-field">
       <label class="entry-label" for="amount">{{benefit.amountLabel}}</label>
       <view class="entry-input-line {{amountError ? 'entry-input-invalid' : ''}}">
-        <text class="entry-currency">{{currency}}</text>
-        <input id="amount" class="entry-amount" type="digit" value="{{amountInput}}" bindinput="onAmountInput" disabled="{{busy || reloading || pendingCreation || targetReviewRequired || !allowed}}" maxlength="18" placeholder="0.00" aria-label="{{benefit.amountLabel}}，{{currency}}" adjust-position="{{true}}" focus="{{focusField === 'amount'}}" />
+        <text wx:if="{{!isPoints}}" class="entry-currency">{{currency === 'CNY' ? '¥' : currency === 'HKD' ? 'HK$' : 'MOP$'}}</text>
+        <input id="amount" class="entry-amount" type="{{isPoints ? 'number' : 'digit'}}" value="{{amountInput}}" bindinput="onAmountInput" disabled="{{busy || reloading || pendingCreation || targetReviewRequired || !allowed}}" maxlength="18" placeholder="{{isPoints ? '0' : '0.00'}}" aria-label="{{benefit.amountLabel}}，{{isPoints ? '积分' : currency}}" adjust-position="{{true}}" focus="{{focusField === 'amount'}}" />
+        <text wx:if="{{isPoints}}" class="entry-currency">积分</text>
       </view>
       <view wx:if="{{amountError}}" class="entry-error" role="alert">{{amountError}}</view>
-      <view class="entry-hint">{{benefit.expectedLabel}} {{expectedText}}，{{benefit.isDiscount ? '请按实际抵扣的金额记录。' : '请按实际收到的金额记录。'}}</view>
+      <view class="entry-hint">{{benefit.expectedLabel}} {{expectedText}}，{{isPoints ? '请按实际到账积分填写，仅支持整数。' : benefit.isDiscount ? '请按实际抵扣的金额记录。' : '请按实际收到的金额记录。'}}</view>
     </view>
     <view class="entry-field entry-date-field" id="receipt-date-field">
       <view class="entry-label">{{benefit.dateLabel}}</view>
@@ -54,7 +57,7 @@
         </view>
       </picker>
       <view wx:if="{{dateError}}" class="entry-error" role="alert">{{dateError}}</view>
-      <view class="entry-hint">计入 {{monthText}}的{{benefit.isDiscount ? '已享优惠' : '返现到账'}}。{{pendingCreation ? '原请求的活动归属期以核对结果为准。' : targetReviewRequired ? '活动归属期仍需单独确认。' : '活动归属期保持不变。'}}</view>
+      <view class="entry-hint">计入 {{monthText}}的{{monthBenefitLabel}}。{{pendingCreation ? '原请求的活动归属期以核对结果为准。' : targetReviewRequired ? '活动归属期仍需单独确认。' : '活动归属期保持不变。'}}</view>
     </view>
     <view class="entry-explanation" wx:if="{{!pendingCreation && !targetReviewRequired && isEditing}}">保存将更正这笔{{benefit.recordNoun}}，不会重复增加一笔。</view>
     <view class="entry-explanation" wx:elif="{{!pendingCreation && !targetReviewRequired && willComplete}}">{{benefit.recordAction}}时，会同时标记本期活动已完成。</view>
@@ -65,4 +68,5 @@
       <button class="entry-primary" bindtap="save" loading="{{busy || dateRefreshing}}" disabled="{{busy || reloading || dateRefreshing || (!pendingCreation && (conflict || targetReviewRequired || !allowed))}}">{{dateRefreshing ? '正在核对日期' : busy ? (pendingCreation && pendingReplayOnly ? '正在核对' : '正在保存') : pendingCreation ? (pendingReplayOnly ? '核对上次保存结果' : '重试上次保存') : reapplyRequired ? '重新应用并保存' : (isEditing ? '保存更正' : benefit.recordAction)}}</button>
     </view>
   </block>
+</view>
 </view>

@@ -5,6 +5,9 @@ import path from 'node:path';
 import vm from 'node:vm';
 import ts from 'typescript';
 import type { Activity, Detail, Entrance } from '../shared/contracts';
+import * as activityCycle from '../shared/activity-cycle';
+import * as activityDesign from '../miniprogram/services/activity-design';
+import * as formDraft from '../miniprogram/services/form-draft';
 
 type Controller = { data: Record<string, any>; [key: string]: any };
 type ModuleExports = Record<string, any>;
@@ -76,10 +79,11 @@ function harness(options: { enabled?: boolean; hosts?: string[] } = {}) {
   }
 
   const errors = evaluate('domain/errors.ts').exports;
-  const calendar = evaluate('domain/calendar.ts', { './errors': errors }).exports;
+  const calendar = evaluate('domain/calendar.ts', { './errors': errors, '../shared/activity-cycle': activityCycle }).exports;
   const catalog = evaluate('shared/catalog.ts').exports;
   const validation = evaluate('domain/validation.ts', {
     './calendar': calendar, './errors': errors, '../shared/catalog': catalog,
+    '../shared/activity-cycle': activityCycle,
   }).exports;
   const entrance = evaluate('miniprogram/services/entrance.ts', {
     '../../domain/validation': validation, '../runtime-config': { default: configuration },
@@ -133,6 +137,8 @@ function harness(options: { enabled?: boolean; hosts?: string[] } = {}) {
       },
       '../../services/format': format, '../../services/card-labels': cardLabels,
       '../../services/benefit-copy': benefit, '../../services/navigation': navigation, '../../services/entrance': entrance,
+      '../../services/activity-design': activityDesign,
+      '../../services/form-draft': formDraft,
     });
     assert.ok(page);
     page.onLoad({ id: activity.id });

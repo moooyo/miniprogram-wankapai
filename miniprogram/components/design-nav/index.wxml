@@ -1,0 +1,2 @@
+<view class="nav-spacer" style="height:{{statusHeight + 44}}px"/>
+<view class="nav" style="padding-top:{{statusHeight}}px"><view class="nav-row {{back ? 'secondary-nav' : ''}}"><button wx:if="{{back}}" class="back" bindtap="goBack" disabled="{{backDisabled}}" aria-label="返回"><view class="back-mark"/></button><view class="nav-title"><text>{{title === '玩卡派' ? subtitle || title : title}}</text><text wx:if="{{demo}}" class="demo" aria-label="演示模式，数据为示例">演示</text></view></view></view>

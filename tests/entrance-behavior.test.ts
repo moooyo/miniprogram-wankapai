@@ -9,6 +9,8 @@ import * as format from '../miniprogram/services/format';
 import * as cardLabels from '../miniprogram/services/card-labels';
 import * as validation from '../domain/validation';
 import type { Activity, Detail } from '../shared/contracts';
+import * as activityDesign from '../miniprogram/services/activity-design';
+import * as formDraft from '../miniprogram/services/form-draft';
 
 function harness(enabled: boolean, allowedHosts: string[], url: string) {
   const configuration = Object.freeze({ webViewEnabled: enabled, allowedWebViewHosts: Object.freeze([...allowedHosts]) });
@@ -59,12 +61,14 @@ function harness(enabled: boolean, allowedHosts: string[], url: string) {
   const detail: Detail = { activity, participation: null, tracking: null, eligible: true, assets: [], audit: [], history: [] };
   evaluate('miniprogram/pages/detail/index.ts', {
     '../../../shared/catalog': { banks, issuers },
-    '../../services/api': { ...client, ensureSession: async () => ({}), api: { query: async () => detail } },
+    '../../services/api': { ...client, ensureSession: async () => ({ userId: 'entrance-owner', today: '2026-09-22', month: '2026-09' }), api: { query: async () => detail } },
     '../../services/format': { ...format, today: () => '2026-09-22', showError(error: unknown) { throw error; } },
     '../../services/card-labels': cardLabels,
     '../../services/benefit-copy': { benefitCopy },
     '../../services/navigation': { navigateBackOr() {} },
     '../../services/entrance': entrance,
+    '../../services/activity-design': activityDesign,
+    '../../services/form-draft': formDraft,
   });
   page.setData({ activityId: activity.id });
   return { page, actions, configuration };

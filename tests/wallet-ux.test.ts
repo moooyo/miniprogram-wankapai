@@ -8,14 +8,16 @@ import { MemoryStore } from '../domain/memory-store';
 import { createService } from '../domain/service';
 import { banks, issuers } from '../shared/catalog';
 import { cardLabel, cardNeedsNickname } from '../miniprogram/services/card-labels';
-import type { ApiRequest, Bill, BillingAccount, Card, Commands, MutationResult, Wallet } from '../shared/contracts';
+import * as entitlementView from '../miniprogram/services/entitlement-view';
+import { money } from '../miniprogram/services/format';
+import type { Activity, ApiRequest, Bill, BillingAccount, Card, Commands, Dashboard, Entitlement, EntitlementList, MutationResult, Participation, Wallet } from '../shared/contracts';
 
 const bill = (id: string, paidAt: string | null = null): Bill => ({
   id, ownerId: 'owner', billingAccountId: 'account', periodKey: '2026-09',
   statementOn: '2026-09-06', dueOn: '2026-09-23', paidAt,
 });
 
-function harness(options: { demo?: boolean; preference?: boolean | null; request?: () => Promise<boolean>; wallet?: Wallet } = {}) {
+function harness(options: { demo?: boolean; preference?: boolean | null; request?: () => Promise<boolean>; wallet?: Wallet; perks?: EntitlementList; dashboard?: Dashboard | null; command?: (action: string, payload: unknown) => Promise<MutationResult> } = {}) {
   const raw: Wallet = options.wallet || {
     cards: [{ id: 'card', ownerId: 'owner', bankId: 'cmb', issuerId: 'cmb-cn', network: 'visa', kind: 'credit', nickname: 'Daily card', billingAccountId: 'account', createdAt: '2026-09-01' }],
     accounts: [{ id: 'account', ownerId: 'owner', bankId: 'cmb', issuerId: 'cmb-cn', label: 'Active account', statementDay: 6, dueDay: 23, dueMonthOffset: 0, remindDays: 3, enabled: true }],
@@ -39,19 +41,25 @@ function harness(options: { demo?: boolean; preference?: boolean | null; request
     require(name: string) {
       if (name.endsWith('/catalog')) return { banks, issuers };
       if (name.endsWith('/card-labels')) return { cardLabel, cardNeedsNickname };
-      if (name.endsWith('/format')) return { today: () => '2026-09-20', periodLabel: (value: string) => value, showError: (error: unknown) => errors.push(error) };
+      if (name.endsWith('/entitlement-view')) return entitlementView;
+      if (name.endsWith('/format')) return { money, today: () => '2026-09-20', periodLabel: (value: string) => value, showError: (error: unknown) => errors.push(error) };
       if (name.endsWith('/api')) return {
         ensureSession: async () => ({ userId: 'owner', isModerator: false, demo: options.demo ?? false, today: '2026-09-20', month: '2026-09' }),
         api: {
           query: async (action: string) => {
             if (action === 'wallet.get') return structuredClone(raw);
+            if (action === 'entitlements.list') return structuredClone(options.perks || { today: '2026-09-20', items: [], cards: raw.cards });
+            if (action === 'dashboard.get') {
+              if (options.dashboard === null) throw new Error('Activity records unavailable');
+              return structuredClone(options.dashboard || { today: '2026-09-20', tasks: [], pendingRewards: [], cards: raw.cards, accounts: raw.accounts, bills: raw.bills });
+            }
             if (action === 'preferences.get') {
               if (options.preference === null) throw new Error('Preferences unavailable');
               return { repayments: options.preference ?? true };
             }
             throw new Error(`Unexpected query: ${action}`);
           },
-          command: async (action: string, payload: unknown) => { commands.push({ action, payload }); return { id: 'mutation' }; },
+          command: async (action: string, payload: unknown) => { commands.push({ action, payload: structuredClone(payload) }); return options.command ? options.command(action, payload) : { id: 'mutation' }; },
         },
         requestReminder: async (kind: string, id: string) => { reminders.push({ kind, id }); return options.request ? options.request() : true; },
       };
@@ -67,6 +75,259 @@ function harness(options: { demo?: boolean; preference?: boolean | null; request
 }
 
 const tap = (id: string) => ({ currentTarget: { dataset: { id } } });
+
+function perk(kind: Entitlement['kind'], patch: Partial<Entitlement> = {}): Entitlement {
+  const counted = kind !== 'delay_insurance' && kind !== 'points';
+  return { id: `perk-${kind}`, ownerId: 'owner', title: `Example ${kind}`, kind, cardId: 'card', provider: 'Manual source',
+    totalUses: counted ? 5 : 0, initialUsed: 0, usedUses: counted ? 2 : 0, startsOn: '2026-01-01', endsOn: '2026-12-31',
+    transferability: 'not_allowed', transferNote: '', notes: '', lounges: [], version: 1,
+    createdAt: '2026-09-01', updatedAt: '2026-09-01', archivedAt: null, ...patch };
+}
+
+function cardActivity(id: string, patch: Partial<Participation> = {}, activityPatch: Partial<Activity> = {}): Participation {
+  const snapshot: Activity = { id: `activity-${id}`, revision: 1, status: 'published', title: `Example ${id}`, bankId: 'cmb', issuerIds: ['cmb-cn'], networks: ['visa'],
+    cardKind: 'credit', cardDescription: 'Visa credit card', frequency: 'monthly', startsOn: '2026-01-01', endsOn: '2026-12-31', target: 3, unit: 'count', currency: 'CNY',
+    rewardMinor: 2000, rewardKind: 'cashback', scope: 'card', requiresRegistration: false, requiresInvitation: false, conditions: 'Three purchases', sourceUrl: '', sourceNote: 'Bank source',
+    entrance: { kind: 'guide', label: 'Bank app', instructions: 'Open bank benefits', imageIds: [] }, publishedAt: '2026-01-01', publishedBy: 'moderator', updatedAt: '2026-01-01', ...activityPatch };
+  return { id, ownerId: 'owner', activityId: snapshot.id, activityRevision: 1, cardId: 'card', scopeKey: 'card:card', snapshot,
+    periodKey: '2026-09', startsOn: '2026-09-01', endsOn: '2026-09-30', stage: 'in_progress', progress: 1, registeredAt: null, startedAt: '2026-09-01', completedAt: null,
+    expectedOn: null, receivedOn: null, receivedMinor: null, version: 1, createdAt: '2026-09-01', updatedAt: '2026-09-01', ...patch };
+}
+
+test('card detail keeps only its explicitly associated perks and matching user activities without asserting this card was used', async () => {
+  const explicit = cardActivity('explicit');
+  const matchingUser = cardActivity('user-match', { cardId: undefined, scopeKey: 'user' }, { scope: 'user' });
+  const tasks = [explicit, matchingUser, cardActivity('another-card', { cardId: 'other-card' }),
+    cardActivity('wrong-bank', { cardId: undefined, scopeKey: 'user' }, { scope: 'user', bankId: 'hsbc' }),
+    cardActivity('wrong-network', { cardId: undefined, scopeKey: 'user' }, { scope: 'user', networks: ['unionpay'] }),
+    cardActivity('card-scope-without-card', { cardId: undefined })];
+  const dashboard: Dashboard = { today: '2026-09-20', tasks, pendingRewards: [explicit], cards: [], accounts: [], bills: [] };
+  const h = harness({ dashboard, perks: { today: '2026-09-20', cards: [], items: [perk('lounge'), perk('points', { cardId: 'other-card', pointsBalance: 1000 }), perk('health_check', { archivedAt: '2026-09-10' })] } });
+  await h.page.load();
+  h.page.openCard(tap('card'));
+  assert.deepEqual(Array.from(h.page.data.selectedPerkRows, (row: any) => row.id), ['perk-lounge']);
+  assert.deepEqual(Array.from(h.page.data.selectedActivities, (row: any) => row.id), ['explicit', 'user-match']);
+  assert.equal(h.page.data.selectedActivities.find((row: any) => row.id === 'explicit').scopeLabel, '已关联这张卡片');
+  assert.equal(h.page.data.selectedActivities.find((row: any) => row.id === 'user-match').scopeLabel, '按用户记录，未确认使用本卡');
+  h.page.openCardActivity(tap('user-match'));
+  assert.equal(h.navigations.at(-1), '/pages/detail/index?activityId=activity-user-match&participationId=user-match');
+  const navigationCount = h.navigations.length;
+  h.page.openCardActivity(tap('another-card'));
+  assert.equal(h.navigations.length, navigationCount);
+  assert.equal(h.commands.length, 0);
+});
+
+test('unavailable activity data retains an unknown count and never fills a card detail with invented participation rows', async () => {
+  const h = harness({ dashboard: null });
+  await h.page.load();
+  assert.equal(h.page.data.stackCards[0].activityCount, null);
+  h.page.openCard(tap('card'));
+  assert.equal(h.page.data.dashboard, null);
+  assert.deepEqual(Array.from(h.page.data.selectedActivities), []);
+  assert.equal(h.commands.length, 0);
+});
+
+test('wallet shows the six design entitlement categories with real quotas and independent informational balances', async () => {
+  const kinds = ['lounge', 'delay_insurance', 'airport_transfer', 'health_check', 'car_wash', 'points'] as const;
+  const items = [...kinds.map(kind => perk(kind, kind === 'points' ? { pointsBalance: 21440 } : kind === 'delay_insurance' ? { description: 'Use this card to purchase eligible travel.' } : {})), perk('other')];
+  const h = harness({ perks: { today: '2026-09-20', items, cards: [] } });
+  await h.page.load();
+  assert.deepEqual(Array.from(h.page.data.perkKinds, (row: any) => row.value), kinds);
+  assert.equal(h.page.data.perkCount, 7);
+  assert.equal(h.page.data.otherPerkCount, 1);
+  const summaries = new Map<string, any>(h.page.data.perkKinds.map((row: any) => [row.value, row]));
+  for (const kind of ['lounge', 'airport_transfer', 'health_check', 'car_wash']) {
+    assert.equal(summaries.get(kind).count, 1);
+    assert.equal(summaries.get(kind).remaining, 3);
+  }
+  assert.equal(summaries.get('delay_insurance').count, 1);
+  assert.equal(summaries.get('delay_insurance').remaining, 0);
+  assert.equal(summaries.get('points').remaining, 0);
+  assert.equal(summaries.get('points').stat, '21,440 分');
+  h.page.changePerkKind({ currentTarget: { dataset: { value: 'points' } } });
+  assert.equal(h.page.data.perkRows[0].balanceText, '21,440');
+  assert.equal(h.page.data.perkRows[0].usable, false);
+  assert.equal(h.page.data.perkRows[0].status, '当前有效');
+  h.page.openEntitlements(tap('perk-points'));
+  assert.equal(h.navigations.at(-1), '/pages/entitlements/index?id=perk-points');
+  assert.equal(h.commands.length, 0);
+});
+
+test('an unknown point balance keeps the wallet aggregate unknown while an explicitly recorded zero stays zero', async () => {
+  const items = [perk('points', { id: 'points-known', pointsBalance: 21440 }), perk('points', { id: 'points-unknown' })];
+  const h = harness({ perks: { today: '2026-09-20', items, cards: [] } });
+  await h.page.load();
+  assert.equal(h.page.data.perkKinds.find((row: any) => row.value === 'points').stat, '余额待填写');
+  h.page.changePerkKind({ currentTarget: { dataset: { value: 'points' } } });
+  assert.equal(h.page.data.perkRows.find((row: any) => row.id === 'points-known').balanceText, '21,440');
+  assert.equal(h.page.data.perkRows.find((row: any) => row.id === 'points-unknown').balanceText, '待填写');
+  items[1].pointsBalance = 0;
+  await h.page.load();
+  assert.equal(h.page.data.perkRows.find((row: any) => row.id === 'points-unknown').balanceText, '0');
+  assert.equal(h.page.data.perkKinds.find((row: any) => row.value === 'points').stat, '21,440 分');
+});
+
+test('a mixed-owner entitlement response cannot expose private balances or descriptions in wallet cards', async () => {
+  const h = harness({ perks: { today: '2026-09-20', items: [perk('lounge'), perk('points', { ownerId: 'another-owner', pointsBalance: 9000, description: 'Private balance detail' })], cards: [] } });
+  await h.page.load();
+  assert.equal(h.page.data.perks, null);
+  assert.equal(h.page.data.perkCount, 0);
+  assert.deepEqual(Array.from(h.page.data.perkRows), []);
+  assert.ok(h.page.data.perkError);
+  assert.equal(h.page.data.stackCards[0].perkCount, 0);
+  assert.doesNotMatch(JSON.stringify(h.page.data), /Private balance detail|9000/);
+});
+
+test('wallet distinguishes missing bill amounts from known currency values and an explicit zero', async () => {
+  const h = harness();
+  await h.page.load();
+  let rows = h.page.data.groups[0].bills;
+  assert.ok(rows.every((row: any) => row.amountMinor === null && row.amountText === '待填写'));
+  assert.equal(h.page.data.stackCards[0].dueAmount, '待填写');
+  h.raw.bills[0].amountMinor = 123456;
+  h.raw.bills[0].currency = 'HKD';
+  h.raw.bills[1].amountMinor = 0;
+  h.raw.bills[1].currency = 'CNY';
+  await h.page.load();
+  rows = h.page.data.groups[0].bills;
+  assert.equal(rows.find((row: any) => row.id === 'unpaid').amountMinor, 123456);
+  assert.equal(rows.find((row: any) => row.id === 'unpaid').amountText, 'HK$1,234.56');
+  assert.equal(rows.find((row: any) => row.id === 'paid').amountMinor, 0);
+  assert.equal(rows.find((row: any) => row.id === 'paid').amountText, '¥0');
+  assert.equal(h.page.data.stackCards[0].dueAmount, 'HK$1,234.56');
+  assert.equal(h.commands.length, 0);
+});
+
+test('saving a bill amount freezes its original amount and currency and submits only the exact selected bill', async () => {
+  let finish!: (value: MutationResult) => void;
+  const h = harness({ command: () => new Promise(resolve => { finish = resolve; }) });
+  await h.page.load();
+  h.page.openCard(tap('card'));
+  assert.equal(h.page.data.billAmountInput, '');
+  assert.equal(h.page.data.showBillControls, false);
+  h.page.toggleBillControls();
+  assert.equal(h.page.data.showBillControls, true);
+  h.page.changeBillAmount({ detail: { value: '1234.56' } });
+  h.page.changeBillCurrency({ detail: { value: String(h.page.data.billCurrencies.findIndex((item: any) => item.value === 'HKD')) } });
+  const currencyIndex = h.page.data.billCurrencyIndex;
+  const saving = h.page.saveBillAmount();
+  assert.equal(h.page.data.busyId, 'unpaid');
+  h.page.changeBillAmount({ detail: { value: '99' } });
+  h.page.changeBillCurrency({ detail: { value: '0' } });
+  h.page.toggleBillControls();
+  h.page.closeCard();
+  await h.page.saveBillAmount();
+  assert.equal(h.page.data.showBillControls, true);
+  assert.equal(h.page.data.cardSheet, true);
+  assert.equal(h.page.data.billAmountInput, '1234.56');
+  assert.equal(h.page.data.billCurrencyIndex, currencyIndex);
+  assert.deepEqual(h.commands, [{ action: 'bill.update', payload: { id: 'unpaid', amountMinor: 123456, currency: 'HKD' } }]);
+  finish({ id: 'unpaid' });
+  await saving;
+  assert.equal(h.page.data.busyId, '');
+  assert.equal(h.raw.bills[0].dueOn, '2026-09-23');
+  assert.equal(h.raw.bills[0].paidAt, null);
+  h.page.closeCard();
+  h.page.openCard(tap('card'));
+  assert.equal(h.page.data.showBillControls, false);
+});
+
+for (const scenario of [
+  { currency: 'CNY', amountMinor: 128050, expected: '¥1,280.50' },
+  { currency: 'HKD', amountMinor: 123456, expected: 'HK$1,234.56' },
+  { currency: 'MOP', amountMinor: 99999999999, expected: 'MOP$999,999,999.99' },
+] as const) {
+  test(`wallet ${scenario.currency} bill and stack use the canonical formatter without changing integer minor units`, async () => {
+    const h = harness();
+    h.raw.bills[0].amountMinor = scenario.amountMinor;
+    h.raw.bills[0].currency = scenario.currency;
+    await h.page.load();
+    const row = h.page.data.groups[0].primaryBill;
+    assert.equal(row.amountMinor, scenario.amountMinor);
+    assert.equal(row.currency, scenario.currency);
+    assert.equal(row.amountText, scenario.expected);
+    assert.equal(row.amountText, money(scenario.amountMinor, scenario.currency));
+    assert.equal(h.page.data.stackCards[0].dueAmount, scenario.expected);
+    assert.equal(h.raw.bills[0].amountMinor, scenario.amountMinor);
+    assert.equal(h.commands.length, 0);
+  });
+}
+
+test('a primary bill changing during refresh discards the prior bill input and loads only the new bill actual amount and currency', async () => {
+  const h = harness();
+  h.raw.bills[0].amountMinor = 5000;
+  h.raw.bills[0].currency = 'CNY';
+  h.raw.bills[1].amountMinor = 128050;
+  h.raw.bills[1].currency = 'MOP';
+  await h.page.load();
+  h.page.openCard(tap('card'));
+  h.page.toggleBillControls();
+  h.page.changeBillAmount({ detail: { value: '999' } });
+  assert.equal(h.page.data.billAmountTargetId, 'unpaid');
+  h.raw.bills[0].paidAt = '2026-09-20';
+  h.raw.bills[1].paidAt = null;
+  await h.page.load();
+  assert.equal(h.page.data.selectedGroup.primaryBill.id, 'paid');
+  assert.equal(h.page.data.billAmountTargetId, 'paid');
+  assert.equal(h.page.data.billAmountInput, '1280.5');
+  assert.equal(h.page.data.billCurrencies[h.page.data.billCurrencyIndex].value, 'MOP');
+  assert.equal(h.page.data.selectedGroup.primaryBill.amountText, 'MOP$1,280.50');
+  assert.equal(h.page.data.showBillControls, false);
+  assert.equal(h.raw.bills[0].amountMinor, 5000);
+  assert.equal(h.raw.bills[1].amountMinor, 128050);
+  assert.equal(h.commands.length, 0);
+});
+
+test('a stale amount draft cannot save when the selected account points to a different primary bill before its input is rebound', async () => {
+  const h = harness();
+  h.raw.bills[1].amountMinor = 128050;
+  h.raw.bills[1].currency = 'HKD';
+  await h.page.load();
+  h.page.openCard(tap('card'));
+  h.page.changeBillAmount({ detail: { value: '999' } });
+  assert.equal(h.page.data.billAmountTargetId, 'unpaid');
+  h.page.data.selectedGroup.primaryBill = h.page.billRow(h.raw.bills[1], '2026-09-20');
+  await h.page.saveBillAmount();
+  assert.equal(h.commands.length, 0);
+  assert.equal(h.raw.bills[1].amountMinor, 128050);
+  h.page.updateCardDetails();
+  assert.equal(h.page.data.billAmountTargetId, 'paid');
+  assert.equal(h.page.data.billAmountInput, '1280.5');
+  assert.equal(h.page.data.billCurrencies[h.page.data.billCurrencyIndex].value, 'HKD');
+  assert.equal(h.commands.length, 0);
+});
+
+test('opening and saving a safe integer bill amount without editing preserves its final minor-unit digit and original target', async () => {
+  const h = harness();
+  h.raw.bills[0].amountMinor = Number.MAX_SAFE_INTEGER;
+  h.raw.bills[0].currency = 'HKD';
+  const original = structuredClone(h.raw.bills[0]);
+  await h.page.load();
+  h.page.openCard(tap('card'));
+  assert.equal(h.page.data.billAmountTargetId, original.id);
+  assert.equal(h.page.data.billAmountInput, '90071992547409.91');
+  assert.equal(h.page.data.billCurrencies[h.page.data.billCurrencyIndex].value, 'HKD');
+  await h.page.saveBillAmount();
+  assert.deepEqual(h.commands, [{ action: 'bill.update', payload: {
+    id: original.id, amountMinor: Number.MAX_SAFE_INTEGER, currency: 'HKD',
+  } }]);
+  assert.deepEqual(h.raw.bills[0], original);
+});
+
+for (const input of ['', '1.001', '-1']) {
+  test(`invalid bill amount input ${JSON.stringify(input)} reports an inline error and preserves the original bill`, async () => {
+    const h = harness();
+    await h.page.load();
+    h.page.openCard(tap('card'));
+    const original = structuredClone(h.raw);
+    h.page.changeBillAmount({ detail: { value: input } });
+    await h.page.saveBillAmount();
+    assert.ok(h.page.data.billAmountError);
+    assert.equal(h.page.data.billAmountInput, input);
+    assert.equal(h.commands.length, 0);
+    assert.deepEqual(h.raw, original);
+  });
+}
 
 test('wallet requests repayment authorization for the exact unpaid bill and waits for acceptance', async () => {
   let finish!: (accepted: boolean) => void;

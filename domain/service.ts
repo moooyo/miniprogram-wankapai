@@ -1,18 +1,19 @@
 import {
   Actor, Activity, ActivityDraft, ActivityItem, ApiRequest, Asset, AuditEvent, Bill, BillingAccount, Card, Commands,
-  Detail, MutationResult, Participation, ReminderJob, ReminderPreference, Reward, Submission, Tracking,
+  Consumption, Detail, MutationResult, Participation, ReminderJob, ReminderPreference, Reward, Submission, Tracking,
 } from '../shared/contracts';
 import { Collection, ServiceOptions, Store } from './store';
 import { Context, createContext } from './context';
 import { DomainError, requireValue } from './errors';
 import { addDays, assertDate, monthOf, periodFor, todayCN } from './calendar';
 import { validateDraft, validateLead } from './validation';
+import { demoRecognition, normalizeRecognition } from './recognition';
 import { ensureBills, getWallet, removeCard, saveCard, updateBill } from './wallet';
 import { archiveEntitlement, getEntitlement, listEntitlements, saveEntitlement, undoEntitlementUsage, useEntitlement } from './entitlements';
 
 export { DomainError } from './errors';
 
-const queryNames = new Set(['session.get', 'request.replay', 'catalog.list', 'activity.get', 'dashboard.get', 'wallet.get', 'rewards.get', 'history.list', 'submissions.list', 'submission.get', 'preferences.get', 'assets.get', 'assets.urls', 'entitlements.list', 'entitlement.get']);
+const queryNames = new Set(['session.get', 'request.replay', 'catalog.list', 'activity.get', 'dashboard.get', 'wallet.get', 'rewards.get', 'history.list', 'submissions.list', 'submission.get', 'preferences.get', 'assets.get', 'assets.urls', 'assets.recognize', 'entitlements.list', 'entitlement.get']);
 const currencies = new Set(['CNY', 'HKD', 'MOP']);
 const ownerWhere = (ownerId: string) => [{ field: 'ownerId', op: 'eq' as const, value: ownerId }];
 const isUnfinished = (record: Participation) => !['completed', 'received', 'skipped'].includes(record.stage);
@@ -33,6 +34,11 @@ function stableId(...parts: string[]): string {
     }
   }
   return words.map(word => word.toString(16).padStart(8, '0')).join('');
+}
+
+function publicAsset(asset: Asset): Asset {
+  const number = String(parseInt(stableId('uploader', asset.ownerId).slice(0, 8), 16) % 10000).padStart(4, '0');
+  return { ...asset, ownerId: '', cloudPath: '', uploader: asset.uploader || `用户 ${number}` };
 }
 
 function boundedText(value: unknown, field: string, max = 128): string {
@@ -58,6 +64,17 @@ function assertModerator(ctx: Context): void {
 
 async function cardsFor(ctx: Context): Promise<Card[]> {
   return (await ctx.store.find<Card>('cards', { where: ownerWhere(ctx.actor.userId) })).filter(card => !card.archivedAt);
+}
+
+function withdrawalFor(record: Participation, trackings: Tracking[]): string | null {
+  const tracking = trackings.find(row => row.activityId === record.activityId && row.scopeKey === record.scopeKey);
+  if (tracking) return tracking.enabled ? null : tracking.withdrawnAt || record.withdrawnAt || tracking.createdAt;
+  return record.withdrawnAt || null;
+}
+
+function projectWithdrawal(record: Participation, trackings: Tracking[]): Participation {
+  const withdrawnAt = withdrawalFor(record, trackings);
+  return withdrawnAt ? { ...record, withdrawnAt } : record.withdrawnAt ? { ...record, withdrawnAt: null } : record;
 }
 
 function matches(activity: Activity, card: Card): boolean {
@@ -122,6 +139,7 @@ async function saveParticipation(ctx: Context, before: Participation, record: Pa
   const saved = { ...record, version: before.version + 1, updatedAt: ctx.now };
   if (saved.beforeCompletion === undefined) delete saved.beforeCompletion;
   if (saved.beforeSkip === undefined) delete saved.beforeSkip;
+  if (saved.completionSource === undefined) delete saved.completionSource;
   await ctx.store.set('participations', saved.id, saved);
   await ctx.audit(saved.id, action, before, saved);
   return { id: saved.id, version: saved.version };
@@ -134,6 +152,37 @@ function checkVersion(record: Participation, expectedVersion: unknown): void {
 function completed(record: Participation, now: string): Participation {
   if (record.stage === 'completed' || record.stage === 'received') return { ...record };
   return { ...record, beforeCompletion: { stage: record.stage, progress: record.progress }, stage: 'completed', completedAt: now };
+}
+
+async function assertConsumptionEnabled(ctx: Context, record: Participation): Promise<void> {
+  const trackings = await ctx.store.find<Tracking>('trackings', { where: ownerWhere(ctx.actor.userId) });
+  requireValue(!withdrawalFor(record, trackings), 'PARTICIPATION_WITHDRAWN', '活动已退出，请重新参加后再记录消费');
+  requireValue(record.stage !== 'received', 'INVALID_STATE', '已到账记录不能修改消费，请先撤销到账');
+  requireValue(record.stage !== 'skipped', 'INVALID_STATE', '本期已跳过，请恢复参与后再记录消费');
+}
+
+function consumptionDelta(record: Participation, supplied: unknown): number {
+  const unit = record.snapshot.unit;
+  const counted = ['笔', '次', 'visits', 'transactions', 'count', 'times'].includes(unit);
+  requireValue(supplied !== undefined || counted, 'INVALID_INPUT', '请明确填写本次计入的进度，消费金额不会自动核验活动规则', 'progressDelta');
+  const delta = supplied === undefined ? 1 : supplied;
+  requireValue(typeof delta === 'number' && Number.isFinite(delta) && delta > 0 && delta <= 1e9, 'INVALID_INPUT', '请填写有效的进度增量', 'progressDelta');
+  requireValue(['元', '港元', '澳门元'].includes(unit) ? /^\d+(?:\.\d{1,2})?$/.test(String(delta)) : Number.isSafeInteger(delta),
+    'INVALID_INPUT', '金额进度最多两位小数，次数进度必须为整数', 'progressDelta');
+  return delta;
+}
+
+function consumptionProgress(record: Participation, delta: number): Participation {
+  const progress = Math.round((record.progress + delta) * 100) / 100;
+  requireValue(progress >= 0 && progress <= 1e9 && Number.isFinite(progress), 'CONFLICT', '消费记录与当前进度不一致，请刷新后核对');
+  const stage = progress > 0 ? 'in_progress' : record.registeredAt ? 'registered' : 'available';
+  let next: Participation = { ...record, progress, stage: record.stage === 'completed' ? 'completed' : stage,
+    startedAt: progress > 0 ? record.startedAt : null };
+  if (record.beforeCompletion) next.beforeCompletion = { stage, progress: Math.round((record.beforeCompletion.progress + delta) * 100) / 100 };
+  if (record.stage === 'completed' && record.completionSource === 'consumption' && progress < record.snapshot.target) {
+    next = { ...next, stage, completedAt: null, expectedOn: null, beforeCompletion: undefined, completionSource: undefined };
+  }
+  return next;
 }
 
 async function ensurePeriods(ctx: Context, limit: number): Promise<number> {
@@ -197,6 +246,19 @@ async function preferences(ctx: Context): Promise<ReminderPreference> {
   return { ownerId: ctx.actor.userId, newActivities: false, deadlines: false, rewards: false, repayments: false, ...previous };
 }
 
+async function recognitionAssets(ctx: Context, payload: Record<string, unknown>): Promise<Asset[]> {
+  requireValue(Array.isArray(payload.ids) && payload.ids.length > 0 && payload.ids.length <= 6, 'INVALID_INPUT', '请选择 1 至 6 张截图', 'ids');
+  const ids = payload.ids.map(value => boundedText(value, 'ids', 80));
+  requireValue(new Set(ids).size === ids.length, 'INVALID_INPUT', '请移除重复截图', 'ids');
+  const assets: Asset[] = [];
+  for (const id of ids) {
+    const asset = await ctx.store.get<Asset>('assets', id);
+    requireValue(asset && (asset.ownerId === ctx.actor.userId || ctx.actor.isModerator), 'NOT_FOUND', '图片不存在或无权识别');
+    assets.push(asset);
+  }
+  return assets;
+}
+
 async function query(ctx: Context, action: string, payload: Record<string, unknown>, options: ServiceOptions): Promise<unknown> {
   if (action === 'session.get') return { userId: ctx.actor.userId, isModerator: ctx.actor.isModerator, today: ctx.today, month: monthOf(ctx.today), demo: Boolean(options.demo || ctx.actor.demo) };
   if (action === 'request.replay') {
@@ -229,7 +291,7 @@ async function query(ctx: Context, action: string, payload: Record<string, unkno
       requireValue(asset.status === 'approved', 'NOT_FOUND', '图片不存在或无权访问');
       if (!published) published = await ctx.store.find<Activity>('activities', { where: [{ field: 'status', op: 'eq', value: 'published' }] });
       requireValue(published.some(activity => activity.entrance.imageIds.includes(asset.id)), 'NOT_FOUND', '图片不存在或无权访问');
-      assets.push({ ...asset, ownerId: '', cloudPath: '' });
+      assets.push(publicAsset(asset));
     }
     return assets;
   }
@@ -245,8 +307,14 @@ async function query(ctx: Context, action: string, payload: Record<string, unkno
     ], orderBy: [{ field: 'endsOn', direction: 'asc' }, { field: 'id', direction: 'asc' }] });
     if (payload.mineOnly) activities = activities.filter(activity => cards.some(card => matches(activity, card)));
     const records = await ctx.store.find<Participation>('participations', { where: ownerWhere(ctx.actor.userId) });
-    const items: ActivityItem[] = activities.map(activity => ({ activity, eligible: cards.some(card => matches(activity, card)), participation: records.find(record => record.activityId === activity.id && record.startsOn <= ctx.today && record.endsOn >= ctx.today) }));
-    return page(items, offset, limit);
+    const trackings = await ctx.store.find<Tracking>('trackings', { where: ownerWhere(ctx.actor.userId) });
+    const items: ActivityItem[] = activities.map(activity => {
+      const participation = records.find(record => record.activityId === activity.id && record.startsOn <= ctx.today && record.endsOn >= ctx.today);
+      return { activity, eligible: cards.some(card => matches(activity, card)),
+        ...(participation ? { participation: projectWithdrawal(participation, trackings) } : {}),
+        tracking: trackings.find(row => row.activityId === activity.id && (!participation || row.scopeKey === participation.scopeKey)) || null };
+    });
+    return { ...page(items, offset, limit), total: activities.length };
   }
   if (action === 'activity.get') {
     let participation: Participation | null = null;
@@ -264,27 +332,33 @@ async function query(ctx: Context, action: string, payload: Record<string, unkno
     let activity = participation?.snapshot || await ctx.store.get<Activity>('activities', activityId);
     requireValue(activity && (participation || (activity.status === 'published' && periodFor(activity, ctx.today))), 'NOT_FOUND', '该活动暂不可用');
     const scopeKey = participation?.scopeKey || (cardId ? activity.scope === 'card' ? `card:${cardId}` : 'user' : undefined);
-    const tracking = (await ctx.store.find<Tracking>('trackings', { where: [...ownerWhere(ctx.actor.userId), { field: 'activityId', op: 'eq', value: activityId }, ...(scopeKey ? [{ field: 'scopeKey', op: 'eq' as const, value: scopeKey }] : [])], limit: 1 }))[0] || null;
+    const trackings = await ctx.store.find<Tracking>('trackings', { where: [...ownerWhere(ctx.actor.userId), { field: 'activityId', op: 'eq', value: activityId }] });
+    const tracking = trackings.find(row => !scopeKey || row.scopeKey === scopeKey) || null;
+    if (participation) participation = projectWithdrawal(participation, trackings);
     const audit = participation ? await ctx.store.find<AuditEvent>('audit_events', { where: [...ownerWhere(ctx.actor.userId), { field: 'entityId', op: 'eq', value: participation.id }], orderBy: [{ field: 'at', direction: 'desc' }], limit: 30 }) : [];
     const assets: Asset[] = [];
     const current = await ctx.store.get<Activity>('activities', activity.id);
     for (const id of current?.status === 'published' ? activity.entrance.imageIds : []) {
       const asset = await ctx.store.get<Asset>('assets', id);
-      if (asset?.status === 'approved') assets.push({ ...asset, ownerId: '', cloudPath: '' });
+      if (asset?.status === 'approved') assets.push(publicAsset(asset));
     }
-    const detail: Detail = { activity, participation, tracking, history: allRecords.slice(0, 24), audit, assets, eligible: (await cardsFor(ctx)).some(card => matches(activity!, card)) };
+    const consumptions = participation ? await ctx.store.find<Consumption>('consumptions', { where: [...ownerWhere(ctx.actor.userId), { field: 'participationId', op: 'eq', value: participation.id }], orderBy: [{ field: 'consumedOn', direction: 'desc' }, { field: 'createdAt', direction: 'desc' }, { field: 'id', direction: 'asc' }] }) : [];
+    const detail: Detail = { activity, participation, tracking, history: allRecords.slice(0, 24).map(record => projectWithdrawal(record, trackings)), audit, assets, consumptions, eligible: (await cardsFor(ctx)).some(card => matches(activity!, card)) };
     return detail;
   }
   if (action === 'dashboard.get') {
     const all = await ctx.store.find<Participation>('participations', { where: ownerWhere(ctx.actor.userId), orderBy: [{ field: 'endsOn', direction: 'asc' }] });
+    const trackings = await ctx.store.find<Tracking>('trackings', { where: ownerWhere(ctx.actor.userId) });
+    const active = all.filter(record => !withdrawalFor(record, trackings));
     const wallet = await getWallet(ctx);
-    return { today: ctx.today, tasks: all.filter(record => (record.startsOn <= ctx.today && record.endsOn >= ctx.today) || isUnfinished(record)), pendingRewards: all.filter(record => record.stage === 'completed'), bills: wallet.bills.filter(bill => !bill.paidAt), accounts: wallet.accounts, cards: wallet.cards };
+    return { today: ctx.today, tasks: active.filter(record => (record.startsOn <= ctx.today && record.endsOn >= ctx.today) || isUnfinished(record)), pendingRewards: active.filter(record => record.stage === 'completed'), bills: wallet.bills.filter(bill => !bill.paidAt), accounts: wallet.accounts, cards: wallet.cards };
   }
   if (action === 'history.list') {
     const { offset, limit } = paging(payload);
     const rows = await ctx.store.find<Participation>('participations', { where: [...ownerWhere(ctx.actor.userId), ...(payload.activityId ? [{ field: 'activityId', op: 'eq' as const, value: boundedText(payload.activityId, 'activityId') }] : [])], orderBy: [{ field: 'startsOn', direction: 'desc' }, { field: 'id', direction: 'asc' }] });
     requireValue(!payload.filter || ['all', 'pending', 'unfinished'].includes(String(payload.filter)), 'INVALID_INPUT', '记录筛选条件无效');
-    return page(rows.filter(record => payload.filter === 'pending' ? record.stage === 'completed' : payload.filter === 'unfinished' ? isUnfinished(record) : true), offset, limit);
+    const trackings = await ctx.store.find<Tracking>('trackings', { where: ownerWhere(ctx.actor.userId) });
+    return page(rows.map(record => projectWithdrawal(record, trackings)).filter(record => payload.filter === 'pending' ? !record.withdrawnAt && record.stage === 'completed' : payload.filter === 'unfinished' ? !record.withdrawnAt && isUnfinished(record) : true), offset, limit);
   }
   if (action === 'rewards.get') {
     const month = payload.month || monthOf(ctx.today);
@@ -294,7 +368,8 @@ async function query(ctx: Context, action: string, payload: Record<string, unkno
     const { offset, limit } = paging(payload);
     const rewards = (await ctx.store.find<Reward>('rewards', { where: [...ownerWhere(ctx.actor.userId), { field: 'currency', op: 'eq', value: currency }], orderBy: [{ field: 'receivedOn', direction: 'desc' }, { field: 'id', direction: 'asc' }] })).filter(reward => !reward.reversedAt && reward.receivedOn.startsWith(`${month}-`));
     const records = await ctx.store.find<Participation>('participations', { where: ownerWhere(ctx.actor.userId) });
-    const allPending = records.filter(record => record.stage === 'completed');
+    const trackings = await ctx.store.find<Tracking>('trackings', { where: ownerWhere(ctx.actor.userId) });
+    const allPending = records.filter(record => !withdrawalFor(record, trackings) && record.stage === 'completed');
     const pending = allPending.filter(record => record.snapshot.currency === currency);
     const pendingCounts = { CNY: 0, HKD: 0, MOP: 0 };
     allPending.forEach(record => { pendingCounts[record.snapshot.currency] += 1; });
@@ -303,10 +378,10 @@ async function query(ctx: Context, action: string, payload: Record<string, unkno
     const cardIds = Object.fromEntries(records.filter(record => record.cardId && receivedIds.has(record.id)).map(record => [record.id, record.cardId!]));
     const recordKinds = new Map(records.map(record => [record.id, record.snapshot.rewardKind]));
     const rewardKinds = Object.fromEntries(received.map(reward => [reward.participationId, recordKinds.get(reward.participationId) || 'cashback']));
-    const cashbackMinor = rewards.filter(reward => recordKinds.get(reward.participationId) !== 'discount').reduce((sum, reward) => sum + reward.amountMinor, 0);
+    const cashbackMinor = rewards.filter(reward => !recordKinds.has(reward.participationId) || recordKinds.get(reward.participationId) === 'cashback').reduce((sum, reward) => sum + reward.amountMinor, 0);
     const discountMinor = rewards.filter(reward => recordKinds.get(reward.participationId) === 'discount').reduce((sum, reward) => sum + reward.amountMinor, 0);
     const cards = await ctx.store.find<Card>('cards', { where: ownerWhere(ctx.actor.userId) });
-    return { month, currency, totalMinor: rewards.reduce((sum, reward) => sum + reward.amountMinor, 0), cashbackMinor, discountMinor, rewardKinds, pending, received, nextCursor: rewards.length > offset + limit ? String(offset + limit) : null, cards, cardIds, pendingCounts };
+    return { month, currency, totalMinor: rewards.filter(reward => recordKinds.get(reward.participationId) !== 'points').reduce((sum, reward) => sum + reward.amountMinor, 0), cashbackMinor, discountMinor, rewardKinds, pending, received, nextCursor: rewards.length > offset + limit ? String(offset + limit) : null, cards, cardIds, pendingCounts };
   }
   if (action === 'submissions.list') {
     if (payload.moderation) assertModerator(ctx);
@@ -338,14 +413,16 @@ async function command(ctx: Context, action: string, payload: any, options: Serv
     const tracking: Tracking = { id, ownerId: ctx.actor.userId, activityId: activity.id, scopeKey: record.scopeKey, ...(selectedCard ? { cardId: selectedCard } : {}), enabled: true, createdAt: previous?.enabled ? previous.createdAt : ctx.now };
     await ctx.store.set('trackings', id, tracking);
     await ctx.audit(record.id, 'tracking.enabled', previous, tracking);
+    if (record.withdrawnAt) return saveParticipation(ctx, record, { ...record, withdrawnAt: null }, 'participation.rejoined');
     return { id: record.id, version: record.version };
   }
   if (action === 'activity.untrack') {
     const record = await ctx.owned<Participation>('participations', payload.participationId);
     const trackings = await ctx.store.find<Tracking>('trackings', { where: [...ownerWhere(ctx.actor.userId), { field: 'activityId', op: 'eq', value: record.activityId }, { field: 'scopeKey', op: 'eq', value: record.scopeKey }] });
-    for (const tracking of trackings) await ctx.store.set('trackings', tracking.id, { ...tracking, enabled: false });
+    for (const tracking of trackings) await ctx.store.set('trackings', tracking.id, { ...tracking, enabled: false, withdrawnAt: tracking.withdrawnAt || ctx.now });
     await ctx.audit(record.id, 'tracking.disabled');
-    return { id: record.id, version: record.version };
+    if (record.withdrawnAt) return { id: record.id, version: record.version };
+    return saveParticipation(ctx, record, { ...record, withdrawnAt: ctx.now }, 'participation.withdrawn');
   }
   if (action === 'participation.progress') {
     const record = await ctx.owned<Participation>('participations', payload.participationId);
@@ -356,6 +433,42 @@ async function command(ctx: Context, action: string, payload: any, options: Serv
     const next: Participation = { ...record, progress: payload.progress, registeredAt: payload.registered ? record.registeredAt || ctx.now : null, startedAt: payload.progress > 0 ? record.startedAt || ctx.now : null, stage: payload.progress > 0 ? 'in_progress' : payload.registered ? 'registered' : 'available' };
     return saveParticipation(ctx, record, next, 'participation.progress');
   }
+  if (action === 'participation.consume') {
+    const record = await ctx.owned<Participation>('participations', payload.participationId);
+    requireValue(Number.isSafeInteger(payload.expectedVersion), 'VERSION_CONFLICT', '记录已更新，请刷新后重试', 'expectedVersion');
+    checkVersion(record, payload.expectedVersion);
+    await assertConsumptionEnabled(ctx, record);
+    const consumedOn = assertDate(payload.consumedOn, 'consumedOn');
+    requireValue(consumedOn <= ctx.today && consumedOn >= record.startsOn && consumedOn <= record.endsOn, 'INVALID_DATE', '消费日期应在原活动期内，且不能晚于今天', 'consumedOn');
+    const amountMinor = payload.amountMinor === undefined ? null : payload.amountMinor;
+    requireValue(amountMinor === null || (Number.isSafeInteger(amountMinor) && amountMinor >= 0 && amountMinor <= 1e11), 'INVALID_INPUT', '请填写有效的消费金额', 'amountMinor');
+    const merchant = payload.merchant === undefined ? '' : payload.merchant;
+    requireValue(typeof merchant === 'string' && merchant.trim().length <= 120 && !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(merchant), 'INVALID_INPUT', '商户名称最多填写 120 字', 'merchant');
+    const progressDelta = consumptionDelta(record, payload.progressDelta);
+    const consumption: Consumption = { id: ctx.newId('c'), ownerId: ctx.actor.userId, participationId: record.id, amountMinor,
+      currency: record.snapshot.currency, merchant: merchant.trim(), consumedOn, progressDelta, reversedAt: null, createdAt: ctx.now };
+    let next = consumptionProgress(record, progressDelta);
+    next.startedAt ||= ctx.now;
+    if (next.stage !== 'completed' && next.progress >= record.snapshot.target) next = { ...completed(next, ctx.now), completionSource: 'consumption' };
+    await ctx.store.set('consumptions', consumption.id, consumption);
+    const result = await saveParticipation(ctx, record, next, 'participation.consumed');
+    await ctx.audit(consumption.id, 'consumption.created', undefined, consumption);
+    return { id: consumption.id, version: result.version };
+  }
+  if (action === 'consumption.revoke') {
+    const consumption = await ctx.owned<Consumption>('consumptions', payload.id);
+    const record = await ctx.owned<Participation>('participations', consumption.participationId);
+    requireValue(Number.isSafeInteger(payload.expectedVersion), 'VERSION_CONFLICT', '记录已更新，请刷新后重试', 'expectedVersion');
+    checkVersion(record, payload.expectedVersion);
+    await assertConsumptionEnabled(ctx, record);
+    requireValue(!consumption.reversedAt, 'CONSUMPTION_REVERSED', '这条消费记录已撤销');
+    requireValue(record.progress >= consumption.progressDelta, 'CONFLICT', '消费记录与当前进度不一致，请刷新后核对');
+    const reversed: Consumption = { ...consumption, reversedAt: ctx.now };
+    await ctx.store.set('consumptions', consumption.id, reversed);
+    const result = await saveParticipation(ctx, record, consumptionProgress(record, -consumption.progressDelta), 'participation.consumption_reverted');
+    await ctx.audit(consumption.id, 'consumption.reversed', consumption, reversed);
+    return result;
+  }
   if (action === 'participation.complete') {
     const record = await resolveParticipation(ctx, payload);
     if (record.stage === 'completed' || record.stage === 'received') return { id: record.id, version: record.version };
@@ -365,7 +478,7 @@ async function command(ctx: Context, action: string, payload: any, options: Serv
     const record = await ctx.owned<Participation>('participations', payload.participationId);
     requireValue(record.stage === 'completed', 'INVALID_STATE', record.stage === 'received' ? '请先撤销到账，再撤销完成' : '当前记录尚未完成');
     const restored = record.beforeCompletion || { stage: record.progress > 0 ? 'in_progress' as const : record.registeredAt ? 'registered' as const : 'available' as const, progress: record.progress };
-    return saveParticipation(ctx, record, { ...record, ...restored, completedAt: null, expectedOn: null, beforeCompletion: undefined }, 'participation.completion_reverted');
+    return saveParticipation(ctx, record, { ...record, ...restored, completedAt: null, expectedOn: null, beforeCompletion: undefined, completionSource: undefined }, 'participation.completion_reverted');
   }
   if (action === 'participation.skip') {
     const record = await ctx.owned<Participation>('participations', payload.participationId);
@@ -389,11 +502,12 @@ async function command(ctx: Context, action: string, payload: any, options: Serv
     requireValue(payload.expectNew === undefined || typeof payload.expectNew === 'boolean', 'INVALID_INPUT', '记录创建条件无效', 'expectNew');
     requireValue(!payload.expectNew || (payload.participationId === undefined && payload.expectedVersion === undefined), 'INVALID_INPUT', '新建记录不能同时指定已有记录或版本', 'expectNew');
     requireValue(payload.expectedPeriodKey === undefined || (payload.expectNew === true && typeof payload.expectedPeriodKey === 'string'
-      && /^(?:once|\d{4}(?:-(?:0[1-9]|1[0-2]|Q[1-4]))?)$/.test(payload.expectedPeriodKey) && !payload.expectedPeriodKey.startsWith('0000')),
+      && /^(?:once|\d{4}(?:-(?:0[1-9]|1[0-2]|Q[1-4]))?|(?:week|month|custom):\d{4}-\d{2}-\d{2})$/.test(payload.expectedPeriodKey) && !payload.expectedPeriodKey.startsWith('0000')),
       'INVALID_INPUT', '新建记录的所属期无效', 'expectedPeriodKey');
     const record = await resolveParticipation(ctx, payload, payload.expectNew === true, payload.expectedPeriodKey);
     checkVersion(record, payload.expectedVersion);
     requireValue(Number.isSafeInteger(payload.amountMinor) && payload.amountMinor >= 0 && payload.amountMinor <= 1e11, 'INVALID_INPUT', record.snapshot.rewardKind === 'discount' ? '请填写有效优惠金额' : '请填写有效到账金额', 'amountMinor');
+    requireValue(record.snapshot.rewardKind !== 'points' || payload.amountMinor % 100 === 0, 'INVALID_INPUT', '积分必须为整数', 'amountMinor');
     const receivedOn = assertDate(payload.receivedOn, 'receivedOn');
     requireValue(receivedOn >= record.startsOn && receivedOn <= ctx.today, 'INVALID_INPUT', record.snapshot.rewardKind === 'discount' ? '享受优惠日期应在本期开始至今天之间' : '到账日期应在本期开始至今天之间', 'receivedOn');
     const rewardId = `r_${stableId(ctx.actor.userId, record.id)}`;
@@ -439,6 +553,7 @@ async function command(ctx: Context, action: string, payload: any, options: Serv
     if (previous) requireValue(Number.isInteger(payload.expectedVersion) && payload.expectedVersion === previous.version, 'VERSION_CONFLICT', '投稿已更新，请刷新后重新编辑');
     const lead = validateLead(payload.lead);
     await validateAssets(ctx, lead.imageIds, ctx.actor.userId, false, 'imageIds');
+    if (lead.rules?.entrance) await validateAssets(ctx, lead.rules.entrance.imageIds, ctx.actor.userId, false, 'rules.entrance.imageIds');
     const id = previous?.id || ctx.newId('submission');
     const submission: Submission = { id, ownerId: ctx.actor.userId, lead, draft: null, status: 'pending', reviewNote: '', createdAt: previous?.createdAt || ctx.now, updatedAt: ctx.now, version: (previous?.version || 0) + 1 };
     await ctx.store.set('submissions', id, submission);
@@ -503,6 +618,8 @@ async function command(ctx: Context, action: string, payload: any, options: Serv
       requireValue(bill.dueOn >= ctx.today, 'REMINDER_UNAVAILABLE', '还款日已过，不再提供这期账单的微信提醒。');
     } else {
       const record = await ctx.owned<Participation>('participations', payload.entityId);
+      const trackings = await ctx.store.find<Tracking>('trackings', { where: ownerWhere(ctx.actor.userId) });
+      requireValue(!withdrawalFor(record, trackings), 'REMINDER_UNAVAILABLE', '活动已退出，请重新参加后再申请提醒');
       if (payload.kind === 'deadline') {
         requireValue(isUnfinished(record) && record.endsOn >= ctx.today, 'REMINDER_UNAVAILABLE', '活动已结束或无需继续参与，不再提供截止提醒。');
       } else {
@@ -561,6 +678,14 @@ export function createService(store: Store, options: ServiceOptions = {}) {
       }
       if (request.action === 'activity.untrack') {
         await createContext(store, actor, today, now, newId).owned<Participation>('participations', (request.payload as Commands['activity.untrack']).participationId);
+      }
+      if (request.action === 'assets.recognize') {
+        const assets = await store.transaction(transaction => recognitionAssets(createContext(transaction, actor, today, now, newId), request.payload as Record<string, unknown>));
+        const demo = Boolean(options.demo || actor.demo);
+        requireValue(demo || options.recognizeAssets, 'OCR_UNAVAILABLE', '截图识别服务尚未配置，请手动填写活动信息');
+        // External provider requests must not repeat when a store transaction replans.
+        const items = demo ? demoRecognition(assets) : await options.recognizeAssets!(actor, assets);
+        return { items: normalizeRecognition(items, assets), demo };
       }
       if (['dashboard.get', 'catalog.list', 'activity.untrack'].includes(request.action)) await materialize(store, actor, today, now, newId, true);
       else if (request.action === 'wallet.get') await materialize(store, actor, today, now, newId, false);

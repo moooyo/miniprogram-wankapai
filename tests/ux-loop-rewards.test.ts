@@ -6,6 +6,7 @@ import ts from 'typescript';
 import * as catalog from '../shared/catalog';
 import * as labels from '../miniprogram/services/card-labels';
 import * as benefit from '../miniprogram/services/benefit-copy';
+import * as entitlementView from '../miniprogram/services/entitlement-view';
 
 function deferred() {
   let resolve!: (value: any) => void;
@@ -20,7 +21,18 @@ function harness(query: (action: string, payload: any) => Promise<any>, route = 
     '../../../shared/catalog': catalog,
     '../../services/card-labels': labels,
     '../../services/benefit-copy': benefit,
-    '../../services/api': { api: { query, command: async (action: string, payload: unknown) => { page.commands.push({ action, payload }); return { id: 'saved' }; } }, ensureSession: async () => ({ today: '2026-09-22', month: '2026-09' }) },
+    '../../services/entitlement-view': entitlementView,
+    '../../services/api': {
+      api: {
+        query: (action: string, payload: any) => {
+          if (action === 'entitlements.list') return Promise.resolve({ today: '2026-09-22', items: [], cards: [] });
+          if (route === 'wallet' && action === 'dashboard.get') return Promise.resolve({ today: '2026-09-22', tasks: [], pendingRewards: [], cards: [], accounts: [], bills: [] });
+          return query(action, payload);
+        },
+        command: async (action: string, payload: unknown) => { page.commands.push({ action, payload }); return { id: 'saved' }; },
+      },
+      ensureSession: async () => ({ userId: 'user-1', isModerator: false, demo: false, today: '2026-09-22', month: '2026-09' }),
+    },
     '../../services/format': { money: (value: number) => String(value), today: () => '2026-09-22', monthKey: () => '2026-09', periodLabel: (value: string) => value, stageLabel: () => '', showError() {} },
     '../../../domain/calendar': { addDays: () => '2026-09-29' },
   };

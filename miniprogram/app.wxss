@@ -1,24 +1,25 @@
-page { --brand:#1f61d8; --ink:#172230; --muted:#626f82; --line:#e5ebf3; --surface:#fff; --page:#f4f7fb; --danger:#ac3737; --success:#326548; --tint:#eef5ff; --control-border:#98a8be; --radius:12px; --touch-size:48px; color:var(--ink); background:var(--page); font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif; font-size:16px; line-height:1.55; }
+page { --brand:#1F61D8; --primary:#1F61D8; --primary-text:#1A56C4; --primary-2:#2B6DE8; --ink:#0F1B2D; --ink2:#3F4D63; --muted:#5E6E84; --placeholder:#9AA8BC; --line:#E3E9F2; --surface:#FFFFFF; --page:#F3F6FB; --sunk:#EBF0F7; --soft:#EEF3FA; --danger:#B8392C; --success:#2D7A4F; --success-bg:#E2F0E4; --warning:#9A5B07; --warning-bg:#FDF1DE; --tint:#E6EEFC; --control-border:#C5D0DF; --radius:18px; --touch-size:44px; color:var(--ink); background:var(--page); font-family:"PingFang SC","Noto Sans SC","Hiragino Sans GB","Microsoft YaHei",system-ui,sans-serif; font-size:14px; line-height:1.55; }
 view,text,button,input,textarea,picker,scroll-view { box-sizing:border-box; }
-button { font-size:14px; font-weight:500; line-height:1.5; border-radius:9px; min-height:48px; display:flex; align-items:center; justify-content:center; padding:10px 15px; margin:0; }
-/* Override the native v2 button size while preserving page-specific widths. */
+button { font-family:inherit; font-size:15px; font-weight:500; line-height:1.5; border-radius:14px; min-height:44px; display:flex; align-items:center; justify-content:center; padding:10px 15px; margin:0; }
 button:not([size=mini]) { width:auto; margin:0; }
 button::after { border:0; }
 button[disabled] { opacity:.55; }
 button:active:not([disabled]) { opacity:.78; }
 button,input,textarea,picker { overflow-wrap:anywhere; }
-.page { padding:16px 16px 28px; }
-.surface { background:#fff; border:1px solid var(--line); border-radius:12px; padding:16px; }
+.page { padding:4px 16px 28px; }
+.surface { background:var(--surface); border:1px solid var(--line); border-radius:18px; padding:16px; }
 .row { display:flex; align-items:center; gap:8px; }
 .row-between { display:flex; align-items:center; justify-content:space-between; gap:10px; }
-.text-muted { color:var(--muted); font-size:14px; }
-.section-title { font-weight:600; font-size:17px; }
+.text-muted { color:var(--muted); font-size:13px; }
+.section-title { font-weight:600; font-size:15px; }
 .primary { background:var(--brand); color:#fff; border:1px solid var(--brand); }
-.secondary { color:var(--brand); background:#eef5ff; border:1px solid #d9e7fb; }
+.secondary { color:var(--primary-text); background:var(--tint); border:1px solid var(--tint); }
 .field { display:flex; flex-direction:column; gap:8px; margin-bottom:18px; }
-.input { width:100%; min-height:48px; border:1px solid #98a8be; padding:10px 12px; border-radius:8px; background:#fff; color:var(--ink); font-size:16px; }
-.bottom-bar { position:fixed; left:0; right:0; bottom:0; z-index:10; background:#fff; border-top:1px solid var(--line); padding:10px 16px calc(10px + env(safe-area-inset-bottom)); display:flex; gap:10px; }
-.bottom-bar button { flex:1; }
-.error { color:var(--danger); font-size:14px; }
-.pagination-error { display:block; color:var(--danger); font-size:14px; line-height:1.6; padding:12px 0; }
-.empty { color:var(--muted); text-align:center; padding:36px 16px; font-size:14px; }
+.input { width:100%; min-height:48px; border:1.5px solid var(--line); padding:10px 12px; border-radius:12px; background:#fff; color:var(--ink); font-size:15px; }
+.bottom-bar { position:fixed; left:0; right:0; bottom:0; z-index:10; background:#fff; border-top:1px solid var(--line); padding:12px 16px calc(12px + env(safe-area-inset-bottom)); display:flex; gap:10px; }
+.bottom-bar button { flex:1; min-height:50px; }
+.error { color:var(--danger); font-size:13px; }
+.pagination-error { display:block; color:var(--danger); font-size:13px; line-height:1.6; padding:12px 0; }
+.empty { color:var(--muted); text-align:center; padding:36px 16px; font-size:13px; }
+.mono,.money,.number { font-family:"DM Mono","SFMono-Regular",Consolas,"PingFang SC",monospace; font-variant-numeric:tabular-nums; }
+@media (prefers-reduced-motion:reduce) { view,button,image { animation:none!important; transition:none!important; } }

@@ -1,16 +1,151 @@
+<design-nav title="活动审核" back />
 <view class="review-page">
-  <view class="page-heading"><text class="page-title">活动审核</text><text class="page-description">核对原始出处与参与入口，再决定是否公开。</text></view>
-  <view wx:if="{{denied}}" class="empty"><text class="empty-title">此账号没有审核权限</text><text class="page-description">运营权限由账号授权决定。</text><button class="text-button" bindtap="goBack">返回</button></view>
+  <view wx:if="{{denied}}" class="empty permission-empty">
+    <view class="empty-art" aria-hidden="true"><view class="document-icon"><view class="document-line"></view><view class="document-line short"></view><view class="document-check"></view></view></view>
+    <text class="empty-title">此账号没有审核权限</text>
+    <text class="page-description">运营权限由账号授权决定。</text>
+    <button class="text-button" bindtap="goBack">返回</button>
+  </view>
   <block wx:else>
-    <view class="tabs"><button class="tab {{status === 'pending' ? 'active' : ''}}" data-status="pending" bindtap="changeStatus" aria-pressed="{{status === 'pending'}}">待审核</button><button class="tab {{status === 'returned' ? 'active' : ''}}" data-status="returned" bindtap="changeStatus" aria-pressed="{{status === 'returned'}}">已退回</button><button class="tab {{status === 'published' ? 'active' : ''}}" data-status="published" bindtap="changeStatus" aria-pressed="{{status === 'published'}}">已发布</button></view>
-    <view wx:if="{{error}}" class="error" role="alert"><text>{{error}}</text><text wx:if="{{items.length}}" class="refresh-copy">{{sessionVerified ? '当前显示上次读取的投稿。' : '已保留列表位置。审核权限暂未核实，重新核实后显示投稿。'}}</text><button class="text-button" bindtap="load" disabled="{{loading}}">{{sessionVerified ? '重新读取投稿' : '重新核实权限'}}</button></view>
+    <view class="review-heading">
+      <text class="page-description">核对原始出处与参与入口后，决定是否公开。</text>
+      <view class="tabs">
+        <button class="tab {{status === 'pending' ? 'active' : ''}}" data-status="pending" bindtap="changeStatus" aria-pressed="{{status === 'pending'}}">待审核</button>
+        <button class="tab {{status === 'returned' ? 'active' : ''}}" data-status="returned" bindtap="changeStatus" aria-pressed="{{status === 'returned'}}">已退回</button>
+        <button class="tab {{status === 'published' ? 'active' : ''}}" data-status="published" bindtap="changeStatus" aria-pressed="{{status === 'published'}}">已发布</button>
+      </view>
+    </view>
+    <view wx:if="{{error}}" class="error" role="alert">
+      <text>{{error}}</text>
+      <text wx:if="{{items.length}}" class="refresh-copy">{{sessionVerified ? '当前显示上次读取的投稿。' : '已保留列表位置。审核权限暂未核实，重新核实后显示投稿。'}}</text>
+      <button class="text-button" bindtap="load" disabled="{{loading}}">{{sessionVerified ? '重新读取投稿' : '重新核实权限'}}</button>
+    </view>
     <text wx:if="{{loading && items.length}}" class="refresh-notice" role="status">{{sessionVerified ? '正在更新审核列表，已显示的内容仍保留…' : '正在核实审核权限，核实通过后显示投稿…'}}</text>
-    <view wx:if="{{loading && !items.length}}" class="loading">{{sessionVerified ? '正在读取投稿…' : '正在核实审核权限…'}}</view>
-    <view wx:elif="{{!items.length && !error}}" class="empty"><text class="empty-title">{{status === 'pending' ? '没有待审核投稿' : status === 'returned' ? '没有退回的投稿' : '还没有已发布投稿'}}</text><text class="page-description">{{status === 'pending' ? '新的活动线索会出现在这里。' : '处理结果会保留在这里，便于核查。'}}</text></view>
+    <view wx:if="{{loading && !items.length}}" class="loading" role="status">{{sessionVerified ? '正在读取投稿…' : '正在核实审核权限…'}}</view>
+    <view wx:elif="{{!items.length && !error}}" class="empty">
+      <view class="empty-art" aria-hidden="true"><view class="document-icon"><view class="document-line"></view><view class="document-line short"></view><view class="document-check"></view></view></view>
+      <text class="empty-title">{{status === 'pending' ? '暂无待审核的投稿' : status === 'returned' ? '暂无已退回的投稿' : '暂无已发布的投稿'}}</text>
+      <text class="page-description">{{status === 'pending' ? '新提交的活动线索将显示在此' : '处理结果将保留在此，便于核查'}}</text>
+    </view>
     <view wx:else class="review-list {{!sessionVerified ? 'is-session-pending' : ''}}" aria-hidden="{{!sessionVerified}}">
-      <button wx:for="{{items}}" wx:key="id" class="review-row" bindtap="open" data-id="{{item.id}}" disabled="{{!sessionVerified}}"><view class="row-top"><text>{{item.bankName}}</text><text>{{item.dateLabel}}</text></view><text class="submission-title">{{item.titleText}}</text><text wx:if="{{item.isLead}}" class="conditions">活动线索 · 待补齐完整规则</text><text class="conditions">{{item.summaryText}}</text><text wx:if="{{status === 'returned'}}" class="review-note">{{item.reviewNote}}</text><view class="row-bottom"><text>{{status === 'pending' ? '核实与审核' : '查看处理结果'}}</text><text class="chevron" aria-hidden="true">›</text></view></button>
+      <view wx:for="{{items}}" wx:key="id" class="review-row" id="review-{{item.id}}" data-id="{{item.id}}">
+        <view class="card-content">
+          <view class="row-top">
+            <image wx:if="{{item.bankLogo}}" class="bank-logo" src="{{item.bankLogo}}" mode="aspectFit" aria-hidden="true" />
+            <text class="bank-name">{{item.bankName}}</text>
+            <text class="date-label">{{item.dateLabel}}</text>
+          </view>
+          <text class="submission-title">{{item.titleText}}</text>
+          <text class="source-type">{{item.sourceSummary}}</text>
+        </view>
+        <view wx:if="{{status === 'pending'}}" class="review-content">
+          <view class="source-panel">
+            <view wx:if="{{item.sourceUrl}}" class="source-row source-link-row">
+              <text class="source-label">链接</text>
+              <text class="source-url">{{item.sourceUrl}}</text>
+              <button class="copy-link" data-id="{{item.id}}" bindtap="copyLink" disabled="{{!sessionVerified}}">复制</button>
+            </view>
+            <view wx:if="{{item.sourceNote}}" class="source-row">
+              <text class="source-label">路径</text>
+              <text class="source-note">{{item.sourceNote}}</text>
+            </view>
+            <view wx:if="{{item.shots.length}}" class="source-row screenshot-row">
+              <text class="source-label">截图</text>
+              <scroll-view scroll-x class="screenshot-scroll" enhanced show-scrollbar="{{false}}">
+                <view class="screenshots">
+                  <button wx:for="{{item.shots}}" wx:for-item="shot" wx:for-index="shotIndex" wx:key="id" class="screenshot-button" data-id="{{item.id}}" data-shot="{{shot.id}}" bindtap="openShot" aria-label="查看来源截图 {{shotIndex + 1}}" disabled="{{!sessionVerified}}"><image class="screenshot" src="{{shot.url}}" mode="aspectFill" lazy-load /></button>
+                </view>
+              </scroll-view>
+            </view>
+          </view>
+          <view wx:if="{{item.form.conflict}}" class="conflict-notice" role="alert">
+            <text>投稿已更新，请重新读取后核对。</text>
+            <button class="inline-link" data-id="{{item.id}}" bindtap="reloadRow" loading="{{item.form.busy}}" disabled="{{anyBusy || item.form.busy || !sessionVerified}}">重新读取</button>
+          </view>
+          <view class="inline-rules">
+            <text class="rules-title">完善规则后发布</text>
+            <view class="inline-field">
+              <text class="field-label">奖励</text>
+              <view class="pills reward-pills">
+                <button wx:for="{{rewardOptions}}" wx:for-item="option" wx:key="id" class="pill {{item.form.rewardTypeSelected && item.form.draft.rewardKind === option.id ? 'selected' : ''}}" data-id="{{item.id}}" data-value="{{option.id}}" bindtap="selectReward" aria-pressed="{{item.form.rewardTypeSelected && item.form.draft.rewardKind === option.id}}" disabled="{{anyBusy || item.form.busy || item.form.conflict || !sessionVerified}}">{{option.name}}</button>
+              </view>
+              <view class="reward-input">
+                <label for="reward-{{item.id}}">{{item.form.draft.rewardKind === 'gift' ? '参考价值' : '金额'}}</label>
+                <input id="reward-{{item.id}}" type="{{item.form.draft.rewardKind === 'points' ? 'number' : 'digit'}}" value="{{item.form.rewardText}}" data-id="{{item.id}}" bindinput="inputReward" maxlength="9" placeholder="{{item.form.draft.rewardKind === 'points' ? '0' : '0.00'}}" placeholder-class="reward-placeholder" disabled="{{anyBusy || item.form.busy || item.form.conflict || !sessionVerified}}" />
+                <text class="reward-unit">{{item.form.rewardUnit}}</text>
+              </view>
+            </view>
+            <view class="inline-field cycle-field">
+              <text class="field-label">重置周期</text>
+              <view class="cycle-control">
+                <button wx:for="{{cycleOptions}}" wx:for-item="option" wx:key="id" class="cycle-option {{item.form.cycleType === option.id ? 'selected' : ''}}" data-id="{{item.id}}" data-value="{{option.id}}" bindtap="selectCycle" aria-pressed="{{item.form.cycleType === option.id}}" disabled="{{anyBusy || item.form.busy || item.form.conflict || !sessionVerified}}">{{option.name}}</button>
+              </view>
+              <view wx:if="{{item.form.cycleType === 'week'}}" class="weekdays">
+                <button wx:for="{{weekdayOptions}}" wx:for-item="option" wx:key="id" class="weekday {{item.form.cycleWeekday === option.id ? 'selected' : ''}}" data-id="{{item.id}}" data-value="{{option.id}}" bindtap="selectWeekday" aria-pressed="{{item.form.cycleWeekday === option.id}}" disabled="{{anyBusy || item.form.busy || item.form.conflict || !sessionVerified}}">{{option.name}}</button>
+              </view>
+              <view wx:if="{{item.form.cycleType === 'month' || item.form.cycleType === 'custom'}}" class="stepper-row">
+                <text class="stepper-label">{{item.form.cycleType === 'month' ? '每月几号重置' : '重置间隔'}}</text>
+                <view class="stepper">
+                  <button class="stepper-button" data-id="{{item.id}}" data-delta="-1" bindtap="stepCycle" aria-label="{{item.form.cycleType === 'month' ? '减少每月重置日期' : '减少重置间隔'}}" disabled="{{anyBusy || item.form.busy || item.form.conflict || !sessionVerified || (item.form.cycleType === 'month' ? item.form.cycleDay <= 1 : item.form.cycleN <= 1)}}"><view class="minus-icon" aria-hidden="true"></view></button>
+                  <text class="stepper-value {{item.form.cycleType === 'custom' ? 'custom-value' : ''}}">{{item.form.cycleType === 'month' ? '每月 ' + item.form.cycleDay + ' 日' : '每 ' + item.form.cycleN + ' ' + item.form.intervalLabel}}</text>
+                  <button class="stepper-button" data-id="{{item.id}}" data-delta="1" bindtap="stepCycle" aria-label="{{item.form.cycleType === 'month' ? '增加每月重置日期' : '增加重置间隔'}}" disabled="{{anyBusy || item.form.busy || item.form.conflict || !sessionVerified || (item.form.cycleType === 'month' ? item.form.cycleDay >= 28 : item.form.cycleN >= (item.form.cycleUnit === 'day' ? 90 : 12))}}"><view class="plus-icon" aria-hidden="true"></view></button>
+                </view>
+              </view>
+              <view wx:if="{{item.form.cycleType === 'custom'}}" class="interval-row">
+                <text class="stepper-label">间隔单位</text>
+                <view class="pills interval-pills">
+                  <button wx:for="{{intervalOptions}}" wx:for-item="option" wx:key="id" class="pill {{item.form.cycleUnit === option.id ? 'selected' : ''}}" data-id="{{item.id}}" data-value="{{option.id}}" bindtap="selectInterval" aria-pressed="{{item.form.cycleUnit === option.id}}" disabled="{{anyBusy || item.form.busy || item.form.conflict || !sessionVerified}}">{{option.name}}</button>
+                </view>
+              </view>
+              <text wx:if="{{item.form.cyclePreview}}" class="cycle-preview">{{item.form.cyclePreview}}</text>
+            </view>
+            <view class="dates-field">
+              <picker class="date-picker" mode="date" value="{{item.form.draft.startsOn}}" start="2025-01-01" end="2028-12-31" data-id="{{item.id}}" data-field="startsOn" bindchange="selectDate" disabled="{{anyBusy || item.form.busy || item.form.conflict || !sessionVerified}}">
+                <view class="date-field"><text class="field-label">开始日期</text><view class="date-value"><text class="{{item.form.draft.startsOn ? '' : 'date-placeholder'}}">{{item.form.draft.startsOn || '选择年月日'}}</text><text class="chevron" aria-hidden="true">›</text></view></view>
+              </picker>
+              <picker class="date-picker" mode="date" value="{{item.form.draft.endsOn}}" start="{{item.form.draft.startsOn || '2025-01-01'}}" end="2028-12-31" data-id="{{item.id}}" data-field="endsOn" bindchange="selectDate" disabled="{{anyBusy || item.form.busy || item.form.conflict || !sessionVerified}}">
+                <view class="date-field"><text class="field-label">结束日期</text><view class="date-value"><text class="{{item.form.draft.endsOn ? '' : 'date-placeholder'}}">{{item.form.draft.endsOn || '选择年月日'}}</text><text class="chevron" aria-hidden="true">›</text></view></view>
+              </picker>
+            </view>
+            <text wx:if="{{item.form.hasOcr}}" class="ocr-hint">投稿人已通过截图识别填写奖励与重置周期，核对无误后可直接发布</text>
+            <view class="full-rules-row">
+              <text wx:if="{{!item.form.complete}}" class="missing-copy">还需完善：<block wx:for="{{item.form.missing}}" wx:for-item="missingField" wx:for-index="missingIndex" wx:key="*this">{{missingIndex ? '、' : ''}}{{missingField}}</block></text>
+              <text wx:else class="complete-copy">已具备完整活动规则</text>
+              <button class="inline-link full-rules-link" data-id="{{item.id}}" bindtap="open" disabled="{{anyBusy || item.form.busy || !sessionVerified}}">{{item.form.complete ? '查看完整规则' : '完善完整规则'}}</button>
+            </view>
+            <text wx:if="{{item.form.dirty}}" class="draft-notice">本页规则调整将在发布时提交。</text>
+          </view>
+          <view class="verification-row">
+            <label class="verification-label" for="source-verified-{{item.id}}"><text class="verification-title">已核实来源与参与入口</text><text class="verification-description">核对适用卡片、门槛、时间、奖励及入口后选择</text></label>
+            <switch id="source-verified-{{item.id}}" checked="{{item.form.sourceVerified}}" color="#1F61D8" data-id="{{item.id}}" bindchange="verifySource" disabled="{{anyBusy || item.form.busy || item.form.conflict || !sessionVerified}}" aria-label="已核实来源与参与入口" />
+          </view>
+          <text wx:if="{{item.form.error}}" class="row-error" role="alert">{{item.form.error}}</text>
+          <view class="review-actions">
+            <button class="return-button" data-id="{{item.id}}" bindtap="openReturn" disabled="{{anyBusy || item.form.busy || item.form.conflict || !sessionVerified}}">退回</button>
+            <button class="publish-button" data-id="{{item.id}}" bindtap="publish" loading="{{item.form.busy}}" disabled="{{anyBusy || item.form.busy || item.form.conflict || !item.form.publishReady || !item.form.sourceVerified || !item.form.complete || !sessionVerified}}">{{item.form.busy ? '正在处理' : '发布'}}</button>
+          </view>
+        </view>
+        <view wx:else class="result-content">
+          <text wx:if="{{status === 'returned'}}" class="review-note">退回原因：{{item.reviewNote}}</text>
+          <view wx:if="{{status === 'published'}}" class="published-note">已发布 · 可查看处理结果</view>
+          <button class="result-link" data-id="{{item.id}}" bindtap="open" disabled="{{!sessionVerified}}"><text>查看处理结果</text><text class="chevron" aria-hidden="true">›</text></button>
+        </view>
+      </view>
     </view>
     <view wx:if="{{loadMoreError && !loading}}" class="error more-error" role="alert"><text>{{loadMoreError}}</text><text class="page-description">已读取的投稿仍保留在上方。</text></view>
-    <button wx:if="{{nextCursor && !loading}}" class="text-button" bindtap="loadMore" loading="{{loadingMore}}" disabled="{{loadingMore || !sessionVerified || refreshing}}">{{loadingMore ? '正在读取更多投稿' : loadMoreError ? '重试加载更多' : '加载更多'}}</button>
+    <button wx:if="{{nextCursor && !loading}}" class="text-button more-button" bindtap="loadMore" loading="{{loadingMore}}" disabled="{{anyBusy || loadingMore || !sessionVerified || refreshing}}">{{loadingMore ? '正在读取更多投稿' : loadMoreError ? '重试加载更多' : '加载更多'}}</button>
   </block>
 </view>
+<app-sheet show="{{returnShow && sessionVerified}}" title="退回投稿" dismissible="{{!returnBusy}}" content-state="{{[returnTitle, returnReason, returnNote, returnError, returnBusy]}}" bindclose="closeReturn">
+  <view class="return-sheet">
+    <text class="return-title">{{returnTitle}}</text>
+    <text class="return-description">选择退回原因，帮助投稿人补充信息。</text>
+    <view class="pills return-reasons"><button wx:for="{{returnReasons}}" wx:for-item="reason" wx:key="*this" class="pill {{returnReason === reason ? 'selected' : ''}}" data-value="{{reason}}" bindtap="selectReturnReason" aria-pressed="{{returnReason === reason}}" disabled="{{returnBusy}}">{{reason}}</button></view>
+    <label class="return-note-label" for="return-note">补充说明</label>
+    <textarea id="return-note" class="return-note-input" value="{{returnNote}}" bindinput="inputReturnNote" maxlength="500" placeholder="说明需要核实或补充的内容" placeholder-class="return-placeholder" auto-height disabled="{{returnBusy}}" />
+    <text class="return-description">退回将引用原投稿，本页尚未发布的规则调整不会保存。</text>
+    <text wx:if="{{returnError}}" class="row-error" role="alert">{{returnError}}</text>
+    <view class="return-sheet-actions"><button class="sheet-cancel" bindtap="closeReturn" disabled="{{returnBusy}}">取消</button><button class="sheet-confirm" bindtap="confirmReturn" loading="{{returnBusy}}" disabled="{{returnBusy || !returnReason}}">{{returnBusy ? '正在退回' : '确认退回'}}</button></view>
+  </view>
+</app-sheet>
+<screenshot-viewer id="review-screenshot-viewer" show="{{viewerShow && sessionVerified}}" items="{{viewerItems}}" index="{{viewerIndex}}" context="review" bindclose="closeViewer" />

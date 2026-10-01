@@ -366,6 +366,36 @@ test('invalid receipt fields remain independent and move focus to the first inva
   assert.equal(commands.length, 0);
 });
 
+test('point receipts display and save integer points without interpreting them as currency', async () => {
+  record = { ...participation(), snapshot: { ...activity, rewardKind: 'points', rewardMinor: 200000 } };
+  const instance = await initialize(2);
+  assert.equal(instance.data.amountInput, '2000');
+  instance.onAmountInput({ detail: { value: '2000' } });
+  instance.onDateChange({ detail: { value: '2026-09-20' } });
+  await instance.save();
+  assert.deepEqual(commands, [{ action: 'reward.confirm', payload: {
+    participationId: record.id, amountMinor: 200000, receivedOn: '2026-09-20', expectedVersion: record.version,
+  } }]);
+  assert.equal(loadDraft('receipt', 'forms-user', record.id), null);
+});
+
+for (const value of ['2000.5', '0']) {
+  test(`point receipt input ${value} keeps the form and reports an inline error without submitting`, async () => {
+    record = { ...participation(), snapshot: { ...activity, rewardKind: 'points', rewardMinor: 200000 } };
+    const instance = await initialize(2);
+    instance.onAmountInput({ detail: { value } });
+    instance.onDateChange({ detail: { value: '2026-09-20' } });
+    await instance.save();
+    assert.ok(instance.data.amountError);
+    assert.equal(instance.data.dateError, '');
+    assert.equal(instance.data.amountInput, value);
+    assert.equal(scrollCalls.at(-1), '#amount-field');
+    assert.equal(commands.length, 0);
+    assert.equal(navigationCalls, 0);
+    assert.equal(loadDraft<{ amountInput: string }>('receipt', 'forms-user', record.id)?.value.amountInput, value);
+  });
+}
+
 test('conditional draft removal protects new revisions and supports legacy fingerprints', () => {
   const key = draftKey('progress', 'forms-user', 'record');
   assert.equal(getDraftRevision('progress', 'forms-user', 'record'), null);

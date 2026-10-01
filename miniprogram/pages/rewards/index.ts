@@ -11,8 +11,8 @@ const currencies: { value: Currency; label: string; name: string }[] = [{ value:
 
 Page({
   data: {
-    loading: true, refreshing: false, refreshError: '', outdated: false, loadingMore: false, loadMoreError: '', failed: false, tab: 'received', month: '', monthLabel: '', maxDate: '',
-    currencyIndex: 0, currencies, total: '', cashbackTotal: '', discountTotal: '', pendingTotal: '', pendingCount: 0,
+    loading: true, refreshing: false, refreshError: '', outdated: false, loadingMore: false, loadMoreError: '', failed: false, tab: 'received', month: '', monthLabel: '', monthShortLabel: '', maxDate: '',
+    currencyIndex: 0, currencies, total: '', cashbackTotal: '', discountTotal: '', pendingTotal: '', pendingPoints: '', pendingCount: 0,
     pendingCurrencies: currencies.map((currency, index) => ({ ...currency, index, count: 0 })),
     pending: [] as PendingRow[], received: [] as ReceivedRow[], nextCursor: null as string | null,
   },
@@ -54,8 +54,9 @@ Page({
       const pendingCounts = result.pendingCounts || { CNY: 0, HKD: 0, MOP: 0 };
       if (!result.pendingCounts) pendingCounts[currency] = result.pending.length;
       this.loadedScope = `${month}:${currency}`;
-      this.setData({ month, outdated: false, monthLabel: `${month.slice(0, 4)} 年 ${Number(month.slice(5))} 月`, maxDate: session.today || today(),
-        total: money(result.totalMinor, currency), pendingTotal: money(result.pending.reduce((sum, p) => sum + p.snapshot.rewardMinor, 0), currency),
+      this.setData({ month, outdated: false, monthLabel: `${month.slice(0, 4)} 年 ${Number(month.slice(5))} 月`, monthShortLabel: `${Number(month.slice(5))}月`, maxDate: session.today || today(),
+        total: money(result.totalMinor, currency), pendingTotal: money(result.pending.filter(p => p.snapshot.rewardKind !== 'points').reduce((sum, p) => sum + p.snapshot.rewardMinor, 0), currency),
+        pendingPoints: result.pending.some(p => p.snapshot.rewardKind === 'points') ? money(result.pending.filter(p => p.snapshot.rewardKind === 'points').reduce((sum, p) => sum + p.snapshot.rewardMinor, 0), currency, 'points') : '',
         cashbackTotal: money(result.cashbackMinor ?? result.totalMinor, currency), discountTotal: money(result.discountMinor ?? 0, currency),
         pendingCount: Object.values(pendingCounts).reduce((sum, count) => sum + count, 0),
         pendingCurrencies: currencies.map((item, index) => ({ ...item, index, count: pendingCounts[item.value] })),
@@ -74,8 +75,8 @@ Page({
       const bank = banks.find(b => b.id === item.snapshot.bankId);
       const benefit = benefitCopy(item.snapshot.rewardKind);
       return { id: item.id, activityId: item.activityId, title: item.snapshot.title, bank: bank?.shortName || '', logo: bank?.logo || '',
-        cardName: cardLabel(item.cardId, cards), period: periodLabel(item.periodKey), reward: money(item.snapshot.rewardMinor, item.snapshot.currency),
-        expected: benefit.isDiscount ? '待确认实际享受的优惠，无需等待银行到账' : item.expectedOn ? `预计 ${item.expectedOn} 到账` : '到账时间未登记',
+        cardName: cardLabel(item.cardId, cards), period: periodLabel(item.periodKey), reward: money(item.snapshot.rewardMinor, item.snapshot.currency, item.snapshot.rewardKind),
+        expected: benefit.isDiscount ? benefit.pendingDescription : item.expectedOn ? `预计 ${item.expectedOn} ${benefit.dateEvent}` : `${benefit.dateEvent}时间未登记`,
         late: !benefit.isDiscount && !!item.expectedOn && item.expectedOn < today(), recordAction: benefit.recordAction, expectedLabel: benefit.expectedLabel };
     });
   },
@@ -84,11 +85,15 @@ Page({
       const bank = banks.find(b => b.id === item.bankId);
       const benefit = benefitCopy(rewardKinds[item.participationId]);
       return { id: item.id, participationId: item.participationId, title: item.title, bank: bank?.shortName || '', logo: bank?.logo || '',
-        cardName: cardLabel(cardIds[item.participationId], cards), amount: money(item.amountMinor, item.currency), date: `${Number(item.receivedOn.slice(5, 7))}/${Number(item.receivedOn.slice(8))}`,
-        period: periodLabel(item.activityPeriod), kindLabel: benefit.isDiscount ? '已享优惠' : '返现到账', amountPrefix: benefit.isDiscount ? '' : '+' };
+        cardName: cardLabel(cardIds[item.participationId], cards), amount: money(item.amountMinor, item.currency, rewardKinds[item.participationId]), date: `${Number(item.receivedOn.slice(5, 7))}/${Number(item.receivedOn.slice(8))}`,
+        period: periodLabel(item.activityPeriod), kindLabel: benefit.kind === 'cashback' ? '返现到账' : benefit.recordedStatus, amountPrefix: benefit.kind === 'cashback' || benefit.kind === 'points' ? '+' : '' };
     });
   },
-  selectTab(event: WechatMiniprogram.TouchEvent) { this.setData({ tab: event.currentTarget.dataset.tab }); },
+  selectTab(event: WechatMiniprogram.TouchEvent) {
+    const tab = event.currentTarget.dataset.tab;
+    this.setData({ tab });
+    wx.pageScrollTo({ selector: tab === 'pending' ? '.pending-section' : '.received-section', duration: 220 });
+  },
   changeCurrency(event: WechatMiniprogram.PickerChange) { this.setData({ currencyIndex: Number(event.detail.value) }); void this.load(); },
   choosePendingCurrency(event: WechatMiniprogram.TouchEvent) {
     const currencyIndex = Number(event.currentTarget.dataset.index);
@@ -98,7 +103,7 @@ Page({
   },
   changeMonth(event: WechatMiniprogram.PickerChange) {
     const month = String(event.detail.value).slice(0, 7);
-    this.setData({ month, monthLabel: `${month.slice(0, 4)} 年 ${Number(month.slice(5))} 月` });
+    this.setData({ month, monthLabel: `${month.slice(0, 4)} 年 ${Number(month.slice(5))} 月`, monthShortLabel: `${Number(month.slice(5))}月` });
     void this.load();
   },
   async loadMore() {

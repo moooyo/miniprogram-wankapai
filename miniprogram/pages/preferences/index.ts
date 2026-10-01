@@ -37,6 +37,11 @@ Page({
     this.setData({ [field]: event.detail.value, dirty: true, saved: false, error: '' });
     this.syncLeaveAlert();
   },
+  toggle(event: { currentTarget: { dataset: { field: string } } }) {
+    const field = event.currentTarget.dataset.field as 'newActivities' | 'deadlines' | 'rewards' | 'repayments';
+    if (!['newActivities', 'deadlines', 'rewards', 'repayments'].includes(field)) return;
+    this.change({ currentTarget: event.currentTarget, detail: { value: !this.data[field] } });
+  },
   toggleHelp() {
     if (this.disposed) return;
     this.setData({ helpExpanded: !this.data.helpExpanded });

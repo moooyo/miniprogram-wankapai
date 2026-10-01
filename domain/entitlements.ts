@@ -80,13 +80,22 @@ function lounge(input: unknown, index: number, today: string): LoungeAccess {
 
 function draft(input: unknown, today: string): EntitlementDraft {
   const source = object(input, 'draft');
-  const kind = choice(source.kind, ['lounge', 'health_check', 'other'] as const, 'kind');
+  const kind = choice(source.kind, ['lounge', 'health_check', 'delay_insurance', 'airport_transfer', 'car_wash', 'points', 'other'] as const, 'kind');
   const startsOn = assertDate(source.startsOn, 'startsOn');
   const endsOn = assertDate(source.endsOn, 'endsOn');
   requireValue(endsOn >= startsOn, 'INVALID_DATE', '结束日期不能早于开始日期', 'endsOn');
   const totalUses = integer(source.totalUses, 0, 9999, 'totalUses');
   const initialUsed = integer(source.initialUsed, 0, 9999, 'initialUsed');
   requireValue(initialUsed <= totalUses, 'INVALID_INPUT', '初始已用次数不能超过总次数', 'initialUsed');
+  if (kind === 'delay_insurance' || kind === 'points') {
+    requireValue(totalUses === 0, 'INVALID_INPUT', '信息类权益不记录总次数', 'totalUses');
+    requireValue(initialUsed === 0, 'INVALID_INPUT', '信息类权益不记录已用次数', 'initialUsed');
+  }
+  const description = source.description === undefined ? undefined : text(source.description, 'description', 2000);
+  requireValue(source.pointsBalance === undefined || kind === 'points', 'INVALID_INPUT', '仅积分权益可填写积分余额', 'pointsBalance');
+  const pointsBalance = source.pointsBalance === undefined ? undefined : integer(source.pointsBalance, 0, Number.MAX_SAFE_INTEGER, 'pointsBalance');
+  requireValue(source.loungeProgram === undefined || kind === 'lounge', 'INVALID_INPUT', '仅机场贵宾厅权益可选择贵宾厅计划', 'loungeProgram');
+  const loungeProgram = source.loungeProgram === undefined ? undefined : choice(source.loungeProgram, ['dragon', 'pp', 'plaza', 'unionpay', 'other'] as const, 'loungeProgram');
   const cardId = text(source.cardId, 'cardId', 128);
   if (cardId) id(cardId, 'cardId');
   requireValue(Array.isArray(source.lounges) && source.lounges.length <= 30, 'INVALID_INPUT', '每项权益最多可记录 30 间休息室', 'lounges');
@@ -102,6 +111,9 @@ function draft(input: unknown, today: string): EntitlementDraft {
     totalUses, initialUsed, startsOn, endsOn,
     transferability: choice(source.transferability, ['allowed', 'grey', 'not_allowed'] as const, 'transferability'),
     transferNote: text(source.transferNote, 'transferNote', 1000), notes: text(source.notes, 'notes', 2000), lounges,
+    ...(description === undefined ? {} : { description }),
+    ...(pointsBalance === undefined ? {} : { pointsBalance }),
+    ...(loungeProgram === undefined ? {} : { loungeProgram }),
   };
 }
 
@@ -149,10 +161,18 @@ export async function saveEntitlement(ctx: Context, payload: Commands['entitleme
     requireValue(usage.usedOn <= next.endsOn, 'INVALID_DATE', '结束日期不能早于已有使用记录日期', 'endsOn');
   }
   const recordedUses = usages.filter(usage => !usage.reversedAt).reduce((sum, usage) => sum + usage.quantity, 0);
+  requireValue(!(next.kind === 'delay_insurance' || next.kind === 'points') || recordedUses === 0,
+    'ENTITLEMENT_INFORMATION_ONLY', '请先撤销有效使用记录，再改为信息类权益', 'kind');
   const usedUses = next.initialUsed + recordedUses;
   requireValue(Number.isSafeInteger(usedUses) && usedUses >= 0 && usedUses <= next.totalUses,
     'INSUFFICIENT_USES', '总次数不能少于初始已用与有效使用记录的合计次数', 'totalUses');
-  if (before) return persist(ctx, before, { ...before, ...next, usedUses }, 'entitlement.updated');
+  if (before) {
+    const updated: Entitlement = { ...before, ...next, usedUses };
+    if (next.description === undefined) delete updated.description;
+    if (next.pointsBalance === undefined) delete updated.pointsBalance;
+    if (next.loungeProgram === undefined) delete updated.loungeProgram;
+    return persist(ctx, before, updated, 'entitlement.updated');
+  }
   const record: Entitlement = {
     ...next, id: ctx.newId('ent'), ownerId: ctx.actor.userId, usedUses, version: 1,
     createdAt: ctx.now, updatedAt: ctx.now, archivedAt: null,
@@ -165,6 +185,8 @@ export async function saveEntitlement(ctx: Context, payload: Commands['entitleme
 export async function useEntitlement(ctx: Context, payload: Commands['entitlement.use']): Promise<MutationResult> {
   const before = await ctx.owned<Entitlement>('entitlements', id(payload.id, 'id'));
   checkVersion(before, payload.expectedVersion);
+  requireValue(before.kind !== 'delay_insurance' && before.kind !== 'points',
+    'ENTITLEMENT_INFORMATION_ONLY', '这项权益仅记录信息，不支持扣除次数');
   requireValue(!before.archivedAt, 'ENTITLEMENT_ARCHIVED', '已归档权益不能记录使用，请先恢复权益');
   const quantity = integer(payload.quantity, 1, 9999, 'quantity');
   const usedOn = assertDate(payload.usedOn, 'usedOn');
@@ -198,6 +220,8 @@ export async function undoEntitlementUsage(ctx: Context, payload: Commands['enti
   const usage = await ctx.owned<EntitlementUsage>('entitlement_usages', id(payload.id, 'id'));
   const before = await ctx.owned<Entitlement>('entitlements', id(usage.entitlementId, 'entitlementId'));
   checkVersion(before, payload.expectedVersion);
+  requireValue(before.kind !== 'delay_insurance' && before.kind !== 'points',
+    'ENTITLEMENT_INFORMATION_ONLY', '这项权益仅记录信息，不支持撤销次数');
   requireValue(!usage.reversedAt, 'USAGE_REVERSED', '这条使用记录已撤销，无需重复操作');
   const usedUses = before.usedUses - usage.quantity;
   requireValue(Number.isSafeInteger(usedUses) && usedUses >= before.initialUsed && usedUses <= before.totalUses,

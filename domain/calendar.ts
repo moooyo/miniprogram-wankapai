@@ -1,5 +1,6 @@
 import { ActivityDraft, BillingAccount } from '../shared/contracts';
 import { DomainError } from './errors';
+import { cycleWindow } from '../shared/activity-cycle';
 
 export interface ActivityPeriod { periodKey: string; startsOn: string; endsOn: string; }
 
@@ -61,12 +62,21 @@ export function addDays(date: string, delta: number): string {
   return assertDate(result);
 }
 
-export function periodFor(activity: Pick<ActivityDraft, 'frequency' | 'startsOn' | 'endsOn'>, date: string): ActivityPeriod | null {
+export function periodFor(activity: Pick<ActivityDraft, 'frequency' | 'cycle' | 'startsOn' | 'endsOn'>, date: string): ActivityPeriod | null {
   assertDate(date);
   assertDate(activity.startsOn, 'startsOn');
   assertDate(activity.endsOn, 'endsOn');
   if (activity.startsOn > activity.endsOn) throw new DomainError('INVALID_DATE', '结束日期不能早于开始日期', 'endsOn');
   if (date < activity.startsOn || date > activity.endsOn) return null;
+  if (activity.cycle) {
+    const window = cycleWindow(activity.cycle, date);
+    if (date < window.s || date > window.e) return null;
+    return {
+      periodKey: activity.cycle.t === 'once' ? 'once' : `${activity.cycle.t}:${window.s}`,
+      startsOn: window.s < activity.startsOn ? activity.startsOn : window.s,
+      endsOn: window.e > activity.endsOn ? activity.endsOn : window.e,
+    };
+  }
   const [year, month] = date.split('-').map(Number);
   let periodKey: string;
   let startsOn: string;

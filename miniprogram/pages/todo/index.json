@@ -1,1 +1,9 @@
-{"navigationBarTitleText":"待办","enablePullDownRefresh":true,"usingComponents":{"app-sheet":"/components/app-sheet/index"}}
+{
+  "navigationBarTitleText": "进度",
+  "navigationStyle": "custom",
+  "enablePullDownRefresh": true,
+  "usingComponents": {
+    "app-sheet": "/components/app-sheet/index",
+    "design-nav": "/components/design-nav/index"
+  }
+}

@@ -15,11 +15,18 @@ function errorField(error: unknown): string {
   return typeof error === 'object' && error !== null && 'field' in error ? String((error as { field?: string }).field || '') : '';
 }
 
-function minorToInput(amount: number): string {
+function minorToInput(amount: number, points = false): string {
+  if (points) return String(amount / 100);
   return `${Math.floor(amount / 100)}.${String(amount % 100).padStart(2, '0')}`;
 }
 
-function parseMinor(value: string): number | null {
+function parseMinor(value: string, points = false): number | null {
+  if (points) {
+    const raw = value.trim();
+    if (!/^\d+$/.test(raw)) return null;
+    const minor = Number(raw) * 100;
+    return Number.isSafeInteger(minor) && minor > 0 ? minor : null;
+  }
   const match = /^(\d+)(?:\.(\d{1,2}))?$/.exec(value.trim());
   if (!match) return null;
   const minor = Number(`${match[1]}${(match[2] || '').padEnd(2, '0')}`);
@@ -50,16 +57,28 @@ interface ReceiptTarget {
 interface PendingReceiptCreation { intentKey: string; payload: Commands['reward.confirm']; target?: ReceiptTarget; activity?: Activity; }
 interface ReceiptDraft {
   amountInput: string; receivedOn: string; draftTarget?: ReceiptTarget; intentKey?: string; pendingCreation?: PendingReceiptCreation;
+  rewardKind?: Activity['rewardKind']; currency?: Currency;
   creationConflict?: boolean;
+}
+function validAmountKind(value: unknown): value is Activity['rewardKind'] {
+  return typeof value === 'string' && ['cashback', 'discount', 'voucher', 'points', 'gift'].includes(value);
+}
+function amountUnitLabel(kind: Activity['rewardKind'], currency: Currency): string {
+  const kinds = { cashback: '返现', discount: '优惠', voucher: '立减金', points: '积分', gift: '礼品参考价值' };
+  const unit = kind === 'points' ? '分' : { CNY: '元', HKD: '港元', MOP: '澳门元' }[currency];
+  return `${kinds[kind]}（${unit}）`;
 }
 function validIntent(value: unknown): value is string { return typeof value === 'string' && value.trim().length > 0 && value.length <= 128; }
 function validTarget(value: unknown): value is ReceiptTarget {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const target = value as ReceiptTarget;
+  const cyclePeriod = typeof target.periodKey === 'string' ? /^(week|month|custom):(\d{4}-\d{2}-\d{2})$/.exec(target.periodKey) : null;
+  const validPeriod = typeof target.periodKey === 'string' && (/^(once|\d{4}(?:-(?:0[1-9]|1[0-2]|Q[1-4]))?)$/.test(target.periodKey)
+    || Boolean(cyclePeriod && isCalendarDate(cyclePeriod[2])));
   return typeof target.activityId === 'string' && !!target.activityId && ['user', 'card'].includes(target.scope)
     && typeof target.cardId === 'string' && (target.scope !== 'card' || !!target.cardId)
     && typeof target.participationId === 'string' && typeof target.periodKey === 'string'
-    && /^(once|\d{4}(?:-(?:0[1-9]|1[0-2]|Q[1-4]))?)$/.test(target.periodKey)
+    && validPeriod
     && isCalendarDate(target.startsOn) && isCalendarDate(target.endsOn) && target.startsOn <= target.endsOn;
 }
 function sameScope(left: ReceiptTarget, right: ReceiptTarget): boolean {
@@ -79,7 +98,7 @@ function validDisplayActivity(value: unknown, activityId: string): value is Acti
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const activity = value as Activity;
   return activity.id === activityId && typeof activity.title === 'string'
-    && ['CNY', 'HKD', 'MOP'].includes(activity.currency) && ['cashback', 'discount'].includes(activity.rewardKind)
+    && ['CNY', 'HKD', 'MOP'].includes(activity.currency) && ['cashback', 'discount', 'voucher', 'points', 'gift'].includes(activity.rewardKind)
     && Number.isSafeInteger(activity.rewardMinor) && activity.rewardMinor >= 0;
 }
 function errorCode(error: unknown): string {
@@ -91,7 +110,9 @@ Page({
     loading: true, loadError: '', formError: '', amountError: '', dateError: '',
     title: '', periodText: '', cardName: '', expectedText: '',
     benefit: benefitCopy(),
-    currency: 'CNY' as Currency, amountInput: '', receivedOn: '', minDate: '', maxDate: '', monthText: '',
+    currency: 'CNY' as Currency, isPoints: false, monthBenefitLabel: '返现到账', amountInput: '', receivedOn: '', minDate: '', maxDate: '', monthText: '',
+    inputRewardKind: 'cashback' as Activity['rewardKind'], inputCurrency: 'CNY' as Currency,
+    unitReviewRequired: false, draftUnitLabel: '', currentUnitLabel: '',
     isEditing: false, willComplete: false, busy: false, allowed: true, reloading: false,
     conflict: false, reapplyRequired: false, latestSummary: '', focusField: '',
     serverToday: '', dateRefreshing: false, dateRefreshError: '', currentTarget: null as ReceiptTarget | null, receiptTarget: null as ReceiptTarget | null,
@@ -248,21 +269,27 @@ Page({
       catch { cardName = '关联卡片暂时无法读取'; }
     }
     if (this.disposed) return;
+    const unitReviewRequired = preserveInput && (this.data.inputRewardKind !== activity.rewardKind || this.data.inputCurrency !== activity.currency);
     this.setData({
       participation, activityId: activity.id, title: activity.title, cardName, benefit,
-      sourceActivity: activity, currentTarget: target, receiptTarget: target, targetReviewRequired: false,
+      sourceActivity: activity, currentTarget: target, receiptTarget: target, targetReviewRequired: unitReviewRequired,
+      unitReviewRequired, draftUnitLabel: unitReviewRequired ? amountUnitLabel(this.data.inputRewardKind, this.data.inputCurrency) : '',
+      currentUnitLabel: amountUnitLabel(activity.rewardKind, activity.currency),
       currentPeriodText: target ? periodLabel(target.periodKey) : '当前活动', periodText: target ? periodLabel(target.periodKey) : '本期活动',
       intentKey: participation ? '' : this.data.intentKey || createCommandIntent(),
-      expectedText: money(activity.rewardMinor, activity.currency), currency: activity.currency,
+      expectedText: money(activity.rewardMinor, activity.currency, activity.rewardKind), currency: activity.currency,
+      isPoints: activity.rewardKind === 'points',
+      monthBenefitLabel: activity.rewardKind === 'points' ? '积分到账' : activity.rewardKind === 'gift' ? '礼品领取' : activity.rewardKind === 'voucher' ? '立减金到账' : benefit.isDiscount ? '已享优惠' : '返现到账',
       minDate, maxDate: currentDate, isEditing,
       willComplete: !participation || !['completed', 'received'].includes(participation.stage),
       allowed: !!target && minDate <= currentDate && participation?.stage !== 'skipped',
       draftEntityId: participation?.id || creationDraftEntityId, creationDraftEntityId,
       latestSummary: participation?.stage === 'received'
-        ? `最新${benefit.actualLabel}：${money(participation.receivedMinor || 0, activity.currency)} · ${participation.receivedOn}`
+        ? `最新${benefit.actualLabel}：${money(participation.receivedMinor || 0, activity.currency, activity.rewardKind)} · ${participation.receivedOn}`
         : `最新记录：${participation ? stageLabel(participation) : `尚未登记${benefit.recordNoun}`}`,
       ...(preserveInput ? {} : {
-        amountInput: amount > 0 ? minorToInput(amount) : '', receivedOn, monthText: receiptMonth(receivedOn),
+        inputRewardKind: activity.rewardKind, inputCurrency: activity.currency,
+        amountInput: amount > 0 ? minorToInput(amount, activity.rewardKind === 'points') : '', receivedOn, monthText: receiptMonth(receivedOn),
       }),
     });
     wx.setNavigationBarTitle({ title: isEditing ? benefit.editTitle : benefit.recordTitle });
@@ -313,6 +340,8 @@ Page({
     })).filter(candidate => {
       const value = candidate.saved?.value;
       if (!value || typeof value.amountInput !== 'string' || !isCalendarDate(value.receivedOn)) return false;
+      if (value.rewardKind !== undefined && !validAmountKind(value.rewardKind)) return false;
+      if (value.currency !== undefined && !['CNY', 'HKD', 'MOP'].includes(value.currency)) return false;
       const pending = readPending(value.pendingCreation);
       if (value.pendingCreation !== undefined && !pending) return false;
       if (pending) {
@@ -382,19 +411,25 @@ Page({
       this.setData({ pendingCreation: pending, pendingPersisted: true, pendingReplayOnly: pendingOnly || this.pendingMustReplayOnly(pending),
         intentKey: pending.intentKey, receiptTarget: pending.target || null, draftEntityId: chosen.entityId,
         isEditing: false, willComplete: false, latestSummary: '', cardName: originalCardName,
-        amountInput: minorToInput(pending.payload.amountMinor), receivedOn: pending.payload.receivedOn, monthText: receiptMonth(pending.payload.receivedOn),
+        amountInput: minorToInput(pending.payload.amountMinor, original ? original.rewardKind === 'points' : this.data.isPoints), receivedOn: pending.payload.receivedOn, monthText: receiptMonth(pending.payload.receivedOn),
         periodText: pending.target ? periodLabel(pending.target.periodKey) : '原活动归属期待核对',
-        ...(original ? { title: original.title, currency: original.currency, benefit: benefitCopy(original.rewardKind), expectedText: money(original.rewardMinor, original.currency) } : {}),
-        loadError: '', unresolvedDraft: false, dirty: true, reapplyRequired: false, targetReviewRequired: false,
+        ...(original ? { title: original.title, currency: original.currency, isPoints: original.rewardKind === 'points',
+          inputRewardKind: original.rewardKind, inputCurrency: original.currency,
+          monthBenefitLabel: original.rewardKind === 'points' ? '积分到账' : original.rewardKind === 'gift' ? '礼品领取' : original.rewardKind === 'voucher' ? '立减金到账' : original.rewardKind === 'discount' ? '已享优惠' : '返现到账',
+          benefit: benefitCopy(original.rewardKind), expectedText: money(original.rewardMinor, original.currency, original.rewardKind) } : {}),
+        loadError: '', unresolvedDraft: false, dirty: true, reapplyRequired: false, targetReviewRequired: false, unitReviewRequired: false,
         draftNotice: '上次保存结果尚未确认，原金额、日期和活动归属期已保留。' });
       wx.enableAlertBeforeUnload({ message: '上次保存结果尚未确认，离开后可继续核对。' });
       return true;
     }
     const target = validTarget(value.draftTarget) ? value.draftTarget : null;
     const knownRecordDraft = !!this.data.currentTarget?.participationId && chosen.entityId === this.data.currentTarget.participationId;
-    const review = target ? target.periodKey !== this.data.currentTarget?.periodKey : !knownRecordDraft;
+    const inputRewardKind = value.rewardKind || this.data.inputRewardKind, inputCurrency = value.currency || this.data.inputCurrency;
+    const unitReviewRequired = inputRewardKind !== this.data.sourceActivity?.rewardKind || inputCurrency !== this.data.sourceActivity?.currency;
+    const review = unitReviewRequired || (target ? target.periodKey !== this.data.currentTarget?.periodKey : !knownRecordDraft);
     const destination = review ? chosen.entityId : this.data.draftEntityId;
     this.setData({ amountInput: value.amountInput, receivedOn: value.receivedOn, monthText: receiptMonth(value.receivedOn),
+      inputRewardKind, inputCurrency, unitReviewRequired, draftUnitLabel: unitReviewRequired ? amountUnitLabel(inputRewardKind, inputCurrency) : '',
       receiptTarget: review ? target : this.data.currentTarget, targetReviewRequired: review, draftEntityId: destination,
       intentKey: validIntent(value.intentKey) ? value.intentKey : this.data.intentKey,
       periodText: target ? periodLabel(target.periodKey) : review ? '活动归属期待确认' : this.data.periodText,
@@ -410,6 +445,9 @@ Page({
     const revision = getDraftRevision('receipt', this.data.ownerId, previousKey);
     const target = this.data.currentTarget;
     this.setData({ receiptTarget: target, targetReviewRequired: false, periodText: periodLabel(target.periodKey),
+      unitReviewRequired: false, draftUnitLabel: '',
+      inputRewardKind: this.data.sourceActivity?.rewardKind || this.data.inputRewardKind,
+      inputCurrency: this.data.sourceActivity?.currency || this.data.inputCurrency,
       draftEntityId: target.participationId || this.data.creationDraftEntityId, intentKey: target.participationId ? '' : createCommandIntent(),
       reapplyRequired: true, formError: '', dateError: '' });
     if (this.persistDraft() && previousKey !== this.data.draftEntityId) removeDraft('receipt', this.data.ownerId, previousKey, revision);
@@ -421,6 +459,7 @@ Page({
     if (this.disposed || this.data.unresolvedDraft) return false;
     const saved = saveDraft('receipt', this.data.ownerId, this.data.draftEntityId, this.data.participation?.version ?? null, {
       amountInput: this.data.amountInput, receivedOn: this.data.receivedOn,
+      rewardKind: this.data.inputRewardKind, currency: this.data.inputCurrency,
       ...(this.data.receiptTarget ? { draftTarget: this.data.receiptTarget } : {}),
       ...(this.data.intentKey ? { intentKey: this.data.intentKey } : {}),
       ...(this.data.pendingCreation ? { pendingCreation: this.data.pendingCreation } : {}),
@@ -457,10 +496,10 @@ Page({
     try {
       await this.applyRecord(await this.readRecord(), true);
       if (this.disposed) return;
-      const review = !!originalTarget && !!this.data.currentTarget && (!sameScope(originalTarget, this.data.currentTarget)
-        || originalTarget.periodKey !== this.data.currentTarget.periodKey);
+      const review = this.data.unitReviewRequired || (!!originalTarget && !!this.data.currentTarget && (!sameScope(originalTarget, this.data.currentTarget)
+        || originalTarget.periodKey !== this.data.currentTarget.periodKey));
       this.setData({ conflict: false, reapplyRequired: true, creationConflict: false, targetReviewRequired: review,
-        ...(review ? { receiptTarget: originalTarget, draftEntityId, periodText: periodLabel(originalTarget!.periodKey) } : {}) });
+        ...(review ? { receiptTarget: originalTarget, draftEntityId, periodText: originalTarget ? periodLabel(originalTarget.periodKey) : '活动归属期待确认' } : {}) });
       if (this.persistDraft() && draftEntityId !== this.data.draftEntityId) {
         removeDraft('receipt', this.data.ownerId, draftEntityId, draftRevision);
       }
@@ -513,9 +552,11 @@ Page({
     } finally { if (!this.disposed) this.setData({ busy: false }); }
   },
   validateReceiptInput(): { amountMinor: number; receivedOn: string } | null {
-    const amountMinor = parseMinor(this.data.amountInput);
+    const amountMinor = parseMinor(this.data.amountInput, this.data.isPoints);
     const receivedOn = this.data.receivedOn;
-    const amountError = amountMinor === null || amountMinor > 1e11 ? '请输入大于 0 且不超过 10 亿元的实际金额，最多两位小数。' : '';
+    const amountError = amountMinor === null || amountMinor > 1e11 ? (this.data.isPoints
+      ? '请输入大于 0 且不超过 10 亿的整数积分。'
+      : '请输入大于 0 且不超过 10 亿元的实际金额，最多两位小数。') : '';
     const dateError = !isCalendarDate(receivedOn) || receivedOn < this.data.minDate || receivedOn > this.data.maxDate
       ? `请选择 ${this.data.minDate} 至 ${this.data.maxDate} 之间的${this.data.benefit.dateLabel}。` : '';
     this.setData({ amountError, dateError, formError: '' });

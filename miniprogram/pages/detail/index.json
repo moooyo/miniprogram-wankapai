@@ -1,4 +1,9 @@
 {
   "navigationBarTitleText": "活动详情",
-  "usingComponents": { "app-sheet": "/components/app-sheet/index" }
+  "navigationStyle": "custom",
+  "usingComponents": {
+    "app-sheet": "/components/app-sheet/index",
+    "design-nav": "/components/design-nav/index",
+    "screenshot-viewer": "/components/screenshot-viewer/index"
+  }
 }

@@ -1,1 +1,9 @@
-{"navigationBarTitleText":"我的权益","enablePullDownRefresh":true}
+{
+  "navigationBarTitleText": "持有权益",
+  "navigationStyle": "custom",
+  "enablePullDownRefresh": true,
+  "usingComponents": {
+    "design-nav": "/components/design-nav/index",
+    "app-sheet": "/components/app-sheet/index"
+  }
+}

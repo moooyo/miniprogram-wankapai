@@ -10,6 +10,7 @@ Page({
     countsReady: false,
     countsError: '',
     session: null as Session | null,
+    userDisplay: '',
     pendingCount: 0,
     returnedCount: 0,
     changingRole: false,
@@ -20,11 +21,11 @@ Page({
   async load() {
     if (this.disposed) return;
     const version = ++this.loadVersion;
-    this.setData({ loading: true, error: '', session: null, countsLoading: false, countsReady: false, countsError: '', pendingCount: 0, returnedCount: 0 });
+    this.setData({ loading: true, error: '', session: null, userDisplay: '', countsLoading: false, countsReady: false, countsError: '', pendingCount: 0, returnedCount: 0 });
     try {
       const session = await ensureSession();
       if (version !== this.loadVersion) return;
-      this.setData({ session, loading: false, countsLoading: true });
+      this.setData({ session, userDisplay: session.demo ? '演示用户' : `用户 ${session.userId.slice(-4)}`, loading: false, countsLoading: true });
     } catch {
       if (version === this.loadVersion) this.setData({ loading: false, session: null, error: '账号信息暂时无法确认，请重试。常用功能仍可从下方进入。' });
       return;
@@ -60,6 +61,9 @@ Page({
       showCancel: false,
       confirmText: '知道了',
     });
+  },
+  onDemoRole(event: { currentTarget: { dataset: { value: number | string } } }) {
+    void this.changeDemoRole({ detail: { value: String(event.currentTarget.dataset.value) } });
   },
   async changeDemoRole(event: { detail: { value: string } }) {
     if (!this.data.session?.demo || this.data.changingRole) return;

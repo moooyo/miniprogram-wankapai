@@ -8,7 +8,10 @@
     "test": "tsx --test tests/*.test.ts",
     "build": "node scripts/build.mjs",
     "pretest:ui": "npm run build",
-    "test:ui": "node scripts/ui-acceptance.mjs",
+    "test:ui": "node scripts/design-acceptance.mjs",
+    "pretest:design": "npm run build",
+    "test:design": "node scripts/design-acceptance.mjs",
+    "test:ui:legacy": "node scripts/ui-acceptance.mjs",
     "prototype": "node scripts/prototype-build.mjs",
     "test:prototype": "node scripts/acceptance-prototype.mjs"
   },

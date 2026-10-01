@@ -1,15 +1,18 @@
-import type { Currency, Participation, Stage } from '../../shared/contracts';
+import type { Currency, Participation, RewardKind, Stage } from '../../shared/contracts';
 import { todayCN } from '../../domain/calendar';
 import { benefitCopy, BenefitKind } from './benefit-copy';
 
 const symbols: Record<Currency,string> = {CNY:'¥',HKD:'HK$',MOP:'MOP$'};
-export function money(minor: number, currency: Currency='CNY'): string {
+export function money(minor: number, currency: Currency='CNY', kind?: RewardKind): string {
   const safe=Number.isSafeInteger(minor)?minor:0;
-  return symbols[currency]+(safe/100).toFixed(2).replace(/\.00$/,'');
+  if(kind==='points')return `${(safe/100).toLocaleString('en-US')} 分`;
+  const absolute=Math.abs(safe), whole=Math.floor(absolute/100).toString().replace(/\B(?=(\d{3})+(?!\d))/g,','), cents=String(absolute%100).padStart(2,'0');
+  return symbols[currency]+(safe<0?'-':'')+whole+(cents==='00'?'':'.'+cents);
 }
 export function today(): string { return todayCN(); }
 export function monthKey(date=today()): string { return date.slice(0,7); }
 export function periodLabel(period: string): string {
+  if(/^(week|month|custom):\d{4}-\d{2}-\d{2}$/.test(period))return `${period.slice(-10).replace(/-/g,'/')} 起`;
   if(period==='once')return '单次活动';
   if(/^\d{4}-Q\d$/.test(period))return `${period.slice(0,4)}年第${period.slice(-1)}季度`;
   if(/^\d{4}-\d{2}$/.test(period))return `${period.slice(0,4)}年${Number(period.slice(5))}月`;

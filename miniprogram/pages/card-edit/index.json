@@ -1,1 +1,7 @@
-{"navigationBarTitleText":"添加卡片"}
+{
+  "navigationBarTitleText": "添加卡片",
+  "navigationStyle": "custom",
+  "usingComponents": {
+    "design-nav": "/components/design-nav/index"
+  }
+}

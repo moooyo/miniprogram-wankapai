@@ -1,10 +1,14 @@
 import type { Activity, Actor, ApiEnvelope, ApiRequest, Asset, Commands, CommandName, Entrance, MutationResult, Participation, Queries, QueryName, ReminderJob, Session, Wallet } from '../../shared/contracts';
 import settings from '../runtime-config';
-import { demoActor, demoService, persistDemo } from './demo';
+import { demoActor, demoService, persistDemo, installDesignDemoFixtures as installFixtures } from './demo';
 import { entranceBehavior } from './entrance';
 
 export class ApiError extends Error {
   constructor(public code:string,message:string,public field?:string){super(message);this.name='ApiError';}
+}
+export async function installDesignDemoFixtures() {
+  if (settings.mode !== 'demo') throw new ApiError('FORBIDDEN', '设计验收数据仅限演示模式');
+  return installFixtures();
 }
 let initialized=false;
 let sessionCache:{value:Session;at:number}|null=null;
@@ -27,6 +31,7 @@ let walletRelationshipsDirty = false;
 const activityScopes = new Map<string, Pick<Activity, 'scope' | 'revision'>>();
 const participationTracking = new Map<string, string>();
 const entitlementUsages = new Map<string, string>();
+const consumptionParticipations = new Map<string, string>();
 
 function trackingResource(activityId: string, scopeKey: string): string {
   return 'tracking:' + JSON.stringify([activityId, scopeKey]);
@@ -60,6 +65,7 @@ function observeQuery<K extends QueryName>(action: K, result: Queries[K]['output
     for (const record of detail.history || []) observeParticipation(record);
     observeParticipation(detail.participation);
     observeActivity(detail.activity);
+    for (const consumption of detail.consumptions || []) consumptionParticipations.set(consumption.id, consumption.participationId);
   }
   if (action === 'catalog.list') {
     for (const item of (result as Queries['catalog.list']['output']).items || []) {
@@ -82,6 +88,10 @@ function observeQuery<K extends QueryName>(action: K, result: Queries[K]['output
 
 function mutationResources(action: CommandName, payload: Commands[CommandName]): string[] {
   const value = payload as { id?: string; participationId?: string; activityId?: string; cardId?: string };
+  if (action === 'consumption.revoke' && value.id) {
+    const participationId = consumptionParticipations.get(value.id);
+    return [`consumption:${value.id}`, ...(participationId ? [`participation:${participationId}`] : [])];
+  }
   if (action === 'entitlement.undo' && value.id) {
     const entitlementId = entitlementUsages.get(value.id);
     return [`entitlement-usage:${value.id}`, ...(entitlementId ? [`entitlement:${entitlementId}`] : [])];
@@ -223,7 +233,7 @@ export const api={
     const createsRecord = ['card.save', 'submission.save', 'submission.lead.save', 'entitlement.save'].includes(action) && (payload as { id?: string }).id === undefined;
     const receipt = payload as Commands['reward.confirm'];
     const createsReceipt = action === 'reward.confirm' && receipt.expectNew === true && receipt.participationId === undefined && receipt.expectedVersion === undefined;
-    if (options.intentKey !== undefined && action !== 'reminder.authorize' && !createsRecord && !createsReceipt) {
+    if (options.intentKey !== undefined && action !== 'reminder.authorize' && action !== 'participation.consume' && action !== 'consumption.revoke' && !createsRecord && !createsReceipt) {
       return Promise.reject(new ApiError('INVALID_INPUT', '操作标识仅用于新建表单或提醒授权。'));
     }
     if (options.replayOnly && options.intentKey === undefined) {
@@ -259,6 +269,9 @@ export const api={
     const pending = executeIntent(intent, () => { mutationDispatched = true; }).then(result => {
       if (action === 'entitlement.use' && (result as MutationResult).id) {
         entitlementUsages.set((result as MutationResult).id, (submittedPayload as Commands['entitlement.use']).id);
+      }
+      if (action === 'participation.consume' && (result as MutationResult).id) {
+        consumptionParticipations.set((result as MutationResult).id, (submittedPayload as Commands['participation.consume']).participationId);
       }
       completeIntent(fingerprint, intent);
       invalidateWalletRelationships(action);

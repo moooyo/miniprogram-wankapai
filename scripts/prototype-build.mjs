@@ -74,14 +74,22 @@ function convertCss(css) {
   return units.replace(/(?:^|(?<=[{}]))([^{}]+)(?=\{)/g, selector => selector.trimStart().startsWith('@') ? selector : mapNativeSelector(selector));
 }
 const pages = {};
+const componentPaths = {
+  ...config.usingComponents,
+  'demo-notice': '/components/demo-notice/index',
+  'privacy-gate': '/components/privacy-gate/index',
+};
 for (const route of config.pages) {
   const markup = await readFile(path.join(client, `${route}.wxml`), 'utf8');
   const nodes = parseWxml(markup);
   const pageConfig = JSON.parse(await readFile(path.join(client, `${route}.json`), 'utf8'));
+  for (const [name, componentPath] of Object.entries(pageConfig.usingComponents || {})) {
+    componentPaths[name] = componentPath.startsWith('/') ? componentPath : '/' + path.relative(client, path.resolve(path.dirname(path.join(client, route)), componentPath)).split(path.sep).join('/');
+  }
   pages[route] = { nodes, actions: listActions(nodes), css: convertCss(await readFile(path.join(client, `${route}.wxss`), 'utf8')), title: pageConfig.navigationBarTitleText || config.window.navigationBarTitleText };
 }
 const components = {};
-for (const [name, componentPath] of Object.entries(config.usingComponents || {})) {
+for (const [name, componentPath] of Object.entries(componentPaths)) {
   const nodes = parseWxml(await readFile(path.join(client, `${componentPath.replace(/^\//, '')}.wxml`), 'utf8'));
   components[name] = { nodes, actions: listActions(nodes) };
 }

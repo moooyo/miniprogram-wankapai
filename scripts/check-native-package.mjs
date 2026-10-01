@@ -59,6 +59,14 @@ export function checkNativePackage(directory = path.join(root, 'dist', 'miniprog
       assert.ok(components.includes(insidePackage(target)), `Missing component in ${relative(filename)}: ${component}`);
     }
   }
+  const componentNames = new Set(components.map(filename => relative(filename).split('/')[1]));
+  for (const filename of allFiles.filter(filename => filename.endsWith('.wxml'))) {
+    const configuration = JSON.parse(readFileSync(filename.replace(/\.wxml$/, '.json'), 'utf8'));
+    const registered = new Set(Object.keys(configuration.usingComponents || {}));
+    for (const [, name] of readFileSync(filename, 'utf8').matchAll(/<([a-z][a-z0-9-]*)\b/g)) {
+      if (componentNames.has(name)) assert.ok(registered.has(name), `Unregistered native component in ${relative(filename)}: ${name}`);
+    }
+  }
 
   const sources = new Map(entries.map(filename => [filename, readFileSync(filename, 'utf8')]));
   const dependencies = [];

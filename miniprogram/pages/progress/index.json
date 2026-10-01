@@ -1,3 +1,7 @@
 {
-  "navigationBarTitleText": "记录进度"
+  "navigationBarTitleText": "记录进度",
+  "navigationStyle": "custom",
+  "usingComponents": {
+    "design-nav": "/components/design-nav/index"
+  }
 }

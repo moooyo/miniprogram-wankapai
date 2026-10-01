@@ -9,6 +9,9 @@ import * as labels from '../miniprogram/services/card-labels';
 import * as benefits from '../miniprogram/services/benefit-copy';
 import * as format from '../miniprogram/services/format';
 import * as entrance from '../miniprogram/services/entrance';
+import * as activityDesign from '../miniprogram/services/activity-design';
+import * as entitlementView from '../miniprogram/services/entitlement-view';
+import * as formDraft from '../miniprogram/services/form-draft';
 
 function detail(endsOn = '2026-09-24', completed = false): Detail {
   const snapshot: Activity = {
@@ -63,6 +66,9 @@ async function harness(route: 'detail' | 'wallet', options: { endsOn?: string; c
       if (name.endsWith('/card-labels')) return labels;
       if (name.endsWith('/benefit-copy')) return benefits;
       if (name.endsWith('/entrance')) return entrance;
+      if (name.endsWith('/activity-design')) return activityDesign;
+      if (name.endsWith('/entitlement-view')) return entitlementView;
+      if (name.endsWith('/form-draft')) return formDraft;
       if (name.endsWith('/navigation')) return { navigateBackOr() {} };
       if (name.endsWith('/format')) return { ...format, today: () => '2099-01-01', showError: (error: unknown) => errors.push(error) };
       if (name.endsWith('/api')) return {

@@ -1,1 +1,7 @@
-{"navigationBarTitleText":"提醒设置"}
+{
+  "navigationBarTitleText": "提醒设置",
+  "navigationStyle": "custom",
+  "usingComponents": {
+    "design-nav": "/components/design-nav/index"
+  }
+}

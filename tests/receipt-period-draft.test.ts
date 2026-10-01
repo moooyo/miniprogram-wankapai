@@ -16,6 +16,7 @@ type ReceiptTarget = {
 type PendingCreation = { intentKey: string; payload: Commands['reward.confirm']; target?: ReceiptTarget; activity?: Activity };
 type ReceiptDraft = {
   amountInput: string; receivedOn: string; intentKey?: string; draftTarget?: ReceiptTarget;
+  rewardKind?: Activity['rewardKind']; currency?: Activity['currency'];
   pendingCreation?: PendingCreation;
 };
 type ReceiptFailure = 'before-commit' | 'after-commit' | null;
@@ -92,8 +93,8 @@ function card(id: string): Card {
   };
 }
 
-async function fixture(options: { date?: string; scope?: Activity['scope']; failure?: ReceiptFailure } = {}) {
-  const source = activity(options.scope);
+async function fixture(options: { date?: string; scope?: Activity['scope']; failure?: ReceiptFailure; activity?: Partial<Activity> } = {}) {
+  const source = { ...activity(options.scope), ...options.activity };
   const cards = [card('card-a'), card('card-b')];
   const store = new MemoryStore({ activities: { [source.id]: source }, cards: Object.fromEntries(cards.map(row => [row.id, row])) });
   let currentDate = new Date(`${options.date || '2026-09-30'}T04:00:00.000Z`);
@@ -171,6 +172,68 @@ function targetFor(source: Activity, overrides: Partial<ReceiptTarget> = {}): Re
   };
 }
 
+for (const scenario of [
+  { name: 'weekly', date: '2026-09-18', cycle: { t: 'week', weekday: 1 }, key: 'week:2026-09-14', startsOn: '2026-09-14', endsOn: '2026-09-20' },
+  { name: 'offset-monthly', date: '2026-09-24', cycle: { t: 'month', day: 21 }, key: 'month:2026-09-21', startsOn: '2026-09-21', endsOn: '2026-10-20' },
+  { name: 'custom', date: '2026-09-24', cycle: { t: 'custom', n: 1, unit: 'month', anchor: '2026-09-01' }, key: 'custom:2026-09-01', startsOn: '2026-09-01', endsOn: '2026-09-30' },
+] as const) {
+  test(`a recovered ${scenario.name} receipt draft retains its exact cycle target and ledger period`, async () => {
+    const f = await fixture({ date: scenario.date, activity: { cycle: scenario.cycle } });
+    const entityId = `new:${f.source.id}:card-a`;
+    const target = targetFor(f.source, { periodKey: scenario.key, startsOn: scenario.startsOn, endsOn: scenario.endsOn });
+    const value: ReceiptDraft = { amountInput: '31.75', receivedOn: scenario.date, intentKey: createCommandIntent(), draftTarget: target };
+    saveDraft('receipt', owner.userId, entityId, null, value);
+    const recovered = await initialize(f);
+    try {
+      assert.equal(modalCalls, 1);
+      assert.equal(recovered.data.amountInput, '31.75');
+      assert.equal(recovered.data.receivedOn, scenario.date);
+      assert.deepEqual(recovered.data.receiptTarget, target);
+      assert.equal(recovered.data.targetReviewRequired, false);
+      assert.deepEqual(draft(recovered)?.value.draftTarget, target);
+      assert.equal(receiptRequests(f).length, 0);
+      await recovered.save();
+      assert.equal(receiptRequests(f).length, 1);
+      assert.equal(receiptRequests(f)[0].payload.expectedPeriodKey, scenario.key);
+      const records = await f.store.find<Participation>('participations');
+      assert.equal(records.length, 1);
+      assert.equal(records[0].periodKey, scenario.key);
+      assert.equal(records[0].startsOn, scenario.startsOn);
+      assert.equal(records[0].endsOn, scenario.endsOn);
+      assert.deepEqual(records[0].snapshot, f.source);
+      const rewards = await f.store.find<Reward>('rewards');
+      assert.equal(rewards.length, 1);
+      assert.equal(rewards[0].activityPeriod, scenario.key);
+      assert.equal(rewards[0].amountMinor, 3175);
+      assert.equal(rewards[0].receivedOn, scenario.date);
+      assert.equal(draft(recovered), null);
+    } finally { recovered.onUnload(); }
+  });
+}
+
+for (const prefix of ['week', 'month', 'custom']) {
+  test(`a malformed ${prefix} draft period with February 30 remains private and cannot be recovered into a new target`, async () => {
+    const f = await fixture();
+    const entityId = `new:${f.source.id}:card-a`;
+    saveDraft('receipt', owner.userId, entityId, null, {
+      amountInput: '97.00', receivedOn: '2026-09-30', intentKey: createCommandIntent(),
+      draftTarget: targetFor(f.source, { periodKey: `${prefix}:2026-02-30` }),
+    });
+    const original = structuredClone(loadDraft<ReceiptDraft>('receipt', owner.userId, entityId));
+    const beforeRecovery = await f.store.exportSeed();
+    const recovered = await initialize(f);
+    try {
+      assert.equal(modalCalls, 0);
+      assert.equal(recovered.data.amountInput, '20.00');
+      assert.equal(recovered.data.receiptTarget.periodKey, '2026-09');
+      assert.deepEqual(draft(recovered, entityId), original);
+      assert.equal(receiptRequests(f).length, 0);
+      assert.deepEqual(await f.store.exportSeed(), beforeRecovery);
+      assert.equal(navigations.length, 0);
+    } finally { recovered.onUnload(); }
+  });
+}
+
 function firstReceipt(source: Activity, receivedOn = '2026-09-30', cardId = 'card-a'): Commands['reward.confirm'] {
   return { activityId: source.id, cardId, amountMinor: 1825, receivedOn, expectNew: true, expectedPeriodKey: '2026-09' };
 }
@@ -189,6 +252,65 @@ function recordWrites(instance: PageInstance) {
     setData(patch, callback);
   };
   return writes;
+}
+
+for (const scenario of [
+  { name: 'points', changes: { rewardKind: 'points' as const, rewardMinor: 200000 }, isPoints: true, currency: 'CNY' as const },
+  { name: 'a foreign currency', changes: { currency: 'HKD' as const }, isPoints: false, currency: 'HKD' as const },
+]) {
+  test(`a same-period cashback draft changing to ${scenario.name} requires explicit unit review before a new receipt`, async () => {
+    const f = await fixture();
+    const original = await initialize(f);
+    changeAmount(original, '18');
+    const entityId = original.data.draftEntityId;
+    const saved = structuredClone(draft(original));
+    assert.equal(saved?.value.rewardKind, 'cashback');
+    assert.equal(saved?.value.currency, 'CNY');
+    original.onUnload();
+    const revised: Activity = { ...f.source, revision: 2, ...scenario.changes };
+    await f.store.set('activities', f.source.id, revised);
+    const restored = await initialize(f);
+    try {
+      assert.equal(restored.data.amountInput, '18');
+      assert.equal(restored.data.receivedOn, '2026-09-30');
+      assert.equal(restored.data.receiptTarget.periodKey, '2026-09');
+      assert.equal(restored.data.unitReviewRequired, true);
+      assert.equal(restored.data.targetReviewRequired, true);
+      assert.equal(restored.data.inputRewardKind, 'cashback');
+      assert.equal(restored.data.inputCurrency, 'CNY');
+      assert.deepEqual(draft(restored, entityId)?.value, saved?.value);
+      await restored.save();
+      assert.equal(receiptRequests(f).length, 0);
+      assert.equal((await f.store.find('participations')).length, 0);
+      assert.equal((await f.store.find('rewards')).length, 0);
+      assert.equal(navigations.length, 0);
+
+      await restored.confirmDraftTarget();
+      assert.equal(restored.data.unitReviewRequired, false);
+      assert.equal(restored.data.targetReviewRequired, false);
+      assert.equal(restored.data.amountInput, '18');
+      assert.equal(restored.data.receivedOn, '2026-09-30');
+      assert.equal(restored.data.isPoints, scenario.isPoints);
+      assert.equal(restored.data.inputRewardKind, revised.rewardKind);
+      assert.equal(restored.data.inputCurrency, scenario.currency);
+      assert.equal(draft(restored)?.value.rewardKind, revised.rewardKind);
+      assert.equal(draft(restored)?.value.currency, scenario.currency);
+      await restored.save();
+      assert.equal(receiptRequests(f).length, 1);
+      assert.equal(receiptRequests(f)[0].payload.amountMinor, 1800);
+      assert.equal(receiptRequests(f)[0].payload.expectedPeriodKey, '2026-09');
+      const records = await f.store.find<Participation>('participations');
+      assert.equal(records.length, 1);
+      assert.deepEqual(records[0].snapshot, revised);
+      assert.equal(records[0].receivedMinor, 1800);
+      const rewards = await f.store.find<Reward>('rewards');
+      assert.equal(rewards.length, 1);
+      assert.equal(rewards[0].currency, scenario.currency);
+      assert.equal(rewards[0].amountMinor, 1800);
+      assert.equal(rewards[0].receivedOn, '2026-09-30');
+      assert.equal(draft(restored, entityId), null);
+    } finally { restored.onUnload(); }
+  });
 }
 
 function controlledLocalClock(instant: string) {

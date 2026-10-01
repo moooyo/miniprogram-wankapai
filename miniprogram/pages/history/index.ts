@@ -1,7 +1,7 @@
 import { AuditEvent, Bank, Participation } from '../../../shared/contracts';
 import { banks } from '../../../shared/catalog';
 import { api, ensureSession } from '../../services/api';
-import { money, periodLabel, stageLabel, showError } from '../../services/format';
+import { money, periodLabel, stageLabel, showError, today } from '../../services/format';
 import { cardLabel, cardLabels } from '../../services/card-labels';
 import { benefitCopy } from '../../services/benefit-copy';
 
@@ -68,13 +68,18 @@ function auditTime(value: string): string {
   return Number.isFinite(time) ? new Date(time + 8 * 60 * 60 * 1000).toISOString().replace('T', ' ').slice(0, 16) : value;
 }
 
+function benefitAmount(minor: number, snapshot: Participation['snapshot']): string {
+  if (snapshot.rewardKind === 'gift') return '实物礼品';
+  return money(minor, snapshot.currency, snapshot.rewardKind);
+}
+
 function auditDescription(event: AuditEvent, record: Participation | null): string {
   const progress = progressAudit(event, record);
   if (progress) return progress.description;
   const copy = benefitCopy(record?.snapshot.rewardKind);
   const after = event.after as Partial<Participation> | undefined;
   if (['reward.confirm', 'reward.confirmed', 'reward.corrected', 'received'].includes(event.action) && after?.receivedMinor !== undefined && after.receivedMinor !== null && record) {
-    return `${copy.actualLabel} ${money(after.receivedMinor, record.snapshot.currency)}${after.receivedOn ? ` · ${copy.dateLabel} ${after.receivedOn}` : ''}`;
+    return `${copy.actualLabel} ${benefitAmount(after.receivedMinor, record.snapshot)}${after.receivedOn ? ` · ${copy.dateLabel} ${after.receivedOn}` : ''}`;
   }
   if (['participation.expected', 'participation.expected_date', 'expected'].includes(event.action)) return after?.expectedOn ? `预计 ${after.expectedOn} ${copy.dateEvent}` : `已清除预计${copy.dateLabel}`;
   return '';
@@ -83,15 +88,27 @@ function auditDescription(event: AuditEvent, record: Participation | null): stri
 function recordView(record: Participation, cardNames: Record<string, string>) {
   const bank = banks.find((item: Bank) => item.id === record.snapshot.bankId);
   const copy = benefitCopy(record.snapshot.rewardKind);
+  const currentYear = today().slice(0, 4);
+  const displayPeriod = record.periodKey.startsWith(`${currentYear}-`) && /^\d{4}-\d{2}$/.test(record.periodKey)
+    ? `${Number(record.periodKey.slice(5))}月` : periodLabel(record.periodKey);
+  const registrationPending = record.snapshot.requiresRegistration && !record.registeredAt && record.stage === 'available';
+  const hasResult = ['completed', 'received'].includes(record.stage);
+  const progress = `${record.progress} / ${record.snapshot.target} ${record.snapshot.unit}`;
   return {
     id: record.id, activityId: record.activityId, title: record.snapshot.title,
     period: periodLabel(record.periodKey), stage: record.stage, stageLabel: stageLabel(record),
+    displayPeriod,
+    displayStage: record.withdrawnAt ? '已退出' : record.stage === 'completed' ? (record.snapshot.rewardKind === 'cashback' ? '待确认到账' : copy.pendingStatus) : record.stage === 'skipped' ? '已跳过' : registrationPending ? '待报名' : stageLabel(record),
+    stageTone: record.withdrawnAt ? '' : ['completed', 'received'].includes(record.stage) ? 'received' : registrationPending ? 'registration' : record.stage === 'skipped' ? '' : 'active',
+    withdrawn: Boolean(record.withdrawnAt),
     logo: bank?.logo || '', bankName: bank?.shortName || '银行',
-    amount: money(record.receivedMinor ?? record.snapshot.rewardMinor, record.snapshot.currency),
+    amount: benefitAmount(record.receivedMinor ?? record.snapshot.rewardMinor, record.snapshot),
     amountLabel: record.stage === 'received' ? copy.actualLabel : copy.expectedLabel,
+    displayAmountLabel: hasResult ? record.stage === 'received' ? (copy.isDiscount ? '优惠' : '到账') : '预计' : '进度',
+    displayValue: hasResult ? benefitAmount(record.receivedMinor ?? record.snapshot.rewardMinor, record.snapshot) : progress,
     dateLabel: copy.dateLabel, dateEvent: copy.dateEvent,
     receivedOn: record.receivedOn || '', expectedOn: record.expectedOn || '', endsOn: record.endsOn,
-    progress: `${record.progress} / ${record.snapshot.target} ${record.snapshot.unit}`,
+    progress,
     cardName: record.cardId ? cardNames[record.cardId] || cardLabel(record.cardId, []) : '',
   };
 }
@@ -100,6 +117,7 @@ Page({
   data: {
     activityId: '', filter: 'all' as 'all' | 'pending' | 'unfinished', showRecordHelp: false,
     items: [] as ReturnType<typeof recordView>[], cardNames: {} as Record<string, string>,
+    counts: { all: '', pending: '', unfinished: '' },
     cursor: null as string | null, loading: true, loadingMore: false, error: '', loadMoreError: '', requestSequence: 0,
     showAudit: false, auditLoading: false, auditTitle: '', auditError: '',
     auditRecordId: '', auditActivityId: '', auditSequence: 0,
@@ -142,7 +160,14 @@ Page({
         records = await api.query('history.list', { ...query, cursor });
         if (this.disposed || sequence !== this.data.requestSequence) return;
       }
-      this.setData({ cardNames, items: [...merged.values()], cursor: records.nextCursor });
+      const items = [...merged.values()];
+      const total = `${items.length}${records.nextCursor ? '+' : ''}`;
+      const counts = this.data.filter === 'all' ? {
+        all: total,
+        pending: `${items.filter(item => !item.withdrawn && item.stage === 'completed').length}${records.nextCursor ? '+' : ''}`,
+        unfinished: `${items.filter(item => !item.withdrawn && !['completed', 'received', 'skipped'].includes(item.stage)).length}${records.nextCursor ? '+' : ''}`,
+      } : { ...this.data.counts, [this.data.filter]: total };
+      this.setData({ cardNames, items, counts, cursor: records.nextCursor });
     } catch (error) {
       if (!this.disposed && sequence === this.data.requestSequence) {
         this.setData(reset ? { error: '参与记录暂时没有加载成功，请重试。' } : { loadMoreError: '更多记录未加载成功，已显示的记录仍可查看。' });

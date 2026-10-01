@@ -1,32 +1,98 @@
-<view class="page rewards-page">
-  <view class="heading">收益</view>
-  <view class="tabs" role="tablist"><button class="tab {{tab === 'received' ? 'active' : ''}}" data-tab="received" bindtap="selectTab" role="tab" aria-selected="{{tab === 'received'}}">已记录</button><button class="tab {{tab === 'pending' ? 'active' : ''}}" data-tab="pending" bindtap="selectTab" role="tab" aria-selected="{{tab === 'pending'}}">待确认 <text>{{pendingCount}}</text></button></view>
-  <view class="reward-filters row-between">
-    <picker wx:if="{{tab === 'received'}}" mode="date" fields="month" value="{{month}}" start="2020-01" end="{{maxDate}}" bindchange="changeMonth" aria-label="选择收益归属月份"><view class="picker-text">{{monthLabel}} <text>⌄</text></view></picker>
-    <text wx:else class="all-periods">全部周期、全部币种共 {{pendingCount}} 笔</text>
-    <picker wx:if="{{tab === 'received'}}" range="{{currencies}}" range-key="label" value="{{currencyIndex}}" bindchange="changeCurrency" aria-label="选择收益币种"><view class="picker-text currency-picker">{{currencies[currencyIndex].label}} <text>⌄</text></view></picker>
-  </view>
-  <view wx:if="{{refreshing || refreshError}}" class="refresh-notice" role="status"><text>{{refreshing ? '正在更新收益，已读记录仍然保留…' : refreshError}}</text><button wx:if="{{refreshError}}" class="load-more" bindtap="load">重新刷新</button></view>
-  <view wx:if="{{loading}}" class="loading text-muted">正在更新收益…</view>
-  <view wx:elif="{{failed}}" class="empty"><view class="empty-title">收益暂时无法加载</view><button class="secondary" bindtap="load">重试</button></view>
-  <block wx:elif="{{tab === 'received'}}">
-    <view class="income-summary {{!received.length ? 'is-empty' : ''}}"><text class="text-muted">所选月份已记录收益</text><view class="income-total">{{total}}</view><block wx:if="{{received.length}}"><view class="income-breakdown"><view><text class="income-kind">返现到账</text><text class="income-part income-cashback">{{cashbackTotal}}</text></view><view><text class="income-kind">已享优惠</text><text class="income-part income-discount">{{discountTotal}}</text></view></view><text class="income-note">返现按到账日期、立减按享受优惠日期统计，不合并不同币种。</text></block></view>
-    <view wx:if="{{received.length}}" class="section-heading"><text>收益记录</text><text class="text-muted">点击可更正</text></view>
-    <button wx:for="{{received}}" wx:key="id" class="ledger-row" data-id="{{item.id}}" bindtap="editReceived" disabled="{{refreshing || outdated}}">
-      <view class="ledger-date">{{item.date}}</view><view class="ledger-main"><view class="bank-line"><image wx:if="{{item.logo}}" class="bank-logo" src="{{item.logo}}" mode="aspectFit" /><text>{{item.bank}}</text><text class="ledger-kind">{{item.kindLabel}}</text></view><view class="ledger-title">{{item.title}}</view><text wx:if="{{item.cardName}}" class="record-card">{{item.cardName}}</text><text class="ledger-period">来自 {{item.period}}{{item.period === '单次活动' ? '' : '活动'}}</text></view><text class="ledger-amount">{{item.amountPrefix}}{{item.amount}}</text>
-    </button>
-    <text wx:if="{{loadMoreError}}" class="pagination-error" role="alert">{{loadMoreError}}</text>
-    <button wx:if="{{nextCursor}}" class="load-more" loading="{{loadingMore}}" disabled="{{loadingMore || refreshing || outdated}}" bindtap="loadMore">{{loadMoreError ? '重试加载更多' : '加载更多记录'}}</button>
-    <view wx:if="{{!received.length}}" class="empty income-empty"><view class="empty-title">这个月还没有收益记录</view><text class="text-muted">{{pendingCount ? '已完成的活动还在待确认中。返现到账或享受优惠后，记录实际金额。' : '返现按到账日期、立减按享受优惠日期统计。可以切换月份查看，或找一项活动参加。'}}</text><button wx:if="{{pendingCount}}" class="primary" data-tab="pending" bindtap="selectTab">查看全部待确认</button><button wx:else class="secondary" bindtap="openActivities">浏览活动</button></view>
-  </block>
-  <block wx:else>
-    <view class="currency-tabs"><button wx:for="{{pendingCurrencies}}" wx:key="value" class="currency-tab {{currencyIndex === item.index ? 'selected' : ''}}" data-index="{{item.index}}" bindtap="choosePendingCurrency" aria-pressed="{{currencyIndex === item.index}}">{{item.name}} {{item.count}} 笔</button></view>
-    <view class="pending-note">返现收到后确认到账；立减享受后记录优惠，无需等待银行到账。跨月未确认的记录会一直保留。</view>
-    <view class="section-heading"><text>{{currencies[currencyIndex].name}} {{pending.length}} 笔待确认</text><text class="text-muted">预计合计 {{pendingTotal}}</text></view>
-    <view class="pending-row" wx:for="{{pending}}" wx:key="id">
-      <button class="pending-open" data-id="{{item.id}}" bindtap="openPending" disabled="{{refreshing || outdated}}"><view class="bank-line"><image wx:if="{{item.logo}}" class="bank-logo" src="{{item.logo}}" mode="aspectFit" /><text>{{item.bank}}</text><text class="pending-period">{{item.period}}</text></view><view class="pending-title">{{item.title}}</view><text wx:if="{{item.cardName}}" class="record-card">{{item.cardName}}</text><view class="expected {{item.late ? 'late' : ''}}">{{item.expected}}{{item.late ? ' · 可向银行核实' : ''}}</view></button>
-      <view class="row-between pending-footer"><text class="pending-amount">{{item.expectedLabel}} {{item.reward}}</text><button class="small-primary" data-id="{{item.id}}" bindtap="confirmPending" disabled="{{refreshing || outdated}}">{{item.recordAction}}</button></view>
+<view class="rewards-page">
+  <design-nav title="收益" back="{{true}}" />
+  <view class="rewards-content">
+    <view wx:if="{{refreshing || refreshError}}" class="refresh-notice" role="status">
+      <text>{{refreshing ? '正在更新收益，已读记录仍然保留…' : refreshError}}</text>
+      <button wx:if="{{refreshError}}" class="load-more" bindtap="load">重新刷新</button>
     </view>
-    <view wx:if="{{!pending.length}}" class="empty"><view class="empty-title">没有待确认的{{currencies[currencyIndex].label}}收益</view><text class="text-muted">返现收到后确认到账；立减享受后记录实际优惠。</text><button class="secondary" bindtap="openActivities">浏览活动</button></view>
-  </block>
+    <view wx:if="{{loading}}" class="state-card loading" role="status">正在更新收益…</view>
+    <view wx:elif="{{failed}}" class="state-card empty">
+      <view class="empty-title">收益暂时无法加载</view>
+      <button class="secondary" bindtap="load">重试</button>
+    </view>
+    <block wx:else>
+      <view class="income-summary">
+        <view class="summary-head">
+          <picker mode="date" fields="month" value="{{month}}" start="2020-01" end="{{maxDate}}" bindchange="changeMonth" aria-label="选择收益归属月份，当前{{monthLabel}}">
+            <view class="summary-month">{{monthShortLabel}}已获得 <text class="picker-arrow">⌄</text></view>
+          </picker>
+          <picker range="{{currencies}}" range-key="label" value="{{currencyIndex}}" bindchange="changeCurrency" aria-label="选择收益币种">
+            <view class="summary-currency">{{currencies[currencyIndex].label}} <text class="picker-arrow">⌄</text></view>
+          </picker>
+        </view>
+        <view class="income-total">{{total}}</view>
+        <text class="income-subtitle">按实际到账及优惠日期统计</text>
+        <view class="summary-divider" />
+        <view class="summary-bottom">
+          <view class="summary-stat">
+            <text class="summary-stat-label">本月返现到账</text>
+            <text class="summary-stat-value">{{cashbackTotal}}</text>
+            <text class="summary-stat-note">已享优惠 {{discountTotal}}</text>
+          </view>
+          <view class="summary-stat summary-stat-right">
+            <text class="summary-stat-label">待确认 {{pending.length}} 笔</text>
+            <text class="summary-stat-value">{{pendingTotal}}</text>
+            <text wx:if="{{pendingPoints}}" class="summary-stat-note">另有 {{pendingPoints}}</text>
+            <text class="summary-stat-note">{{currencies[currencyIndex].name}} · 全部周期</text>
+          </view>
+        </view>
+      </view>
+
+      <view class="section-heading pending-section">
+        <text class="section-title">待确认</text>
+        <text class="section-count">{{pending.length}} 笔</text>
+        <view class="section-switch" role="group" aria-label="收益记录定位">
+          <button class="section-tab {{tab === 'pending' ? 'selected' : ''}}" data-tab="pending" bindtap="selectTab" aria-pressed="{{tab === 'pending'}}">待确认</button>
+          <button class="section-tab {{tab === 'received' ? 'selected' : ''}}" data-tab="received" bindtap="selectTab" aria-pressed="{{tab === 'received'}}">已记录</button>
+        </view>
+      </view>
+      <view wx:if="{{pendingCount > pending.length}}" class="currency-tabs">
+        <button wx:for="{{pendingCurrencies}}" wx:key="value" class="currency-tab {{currencyIndex === item.index ? 'selected' : ''}}" data-index="{{item.index}}" bindtap="choosePendingCurrency" aria-pressed="{{currencyIndex === item.index}}">{{item.name}} {{item.count}} 笔</button>
+      </view>
+      <view class="record-card-list pending-list">
+        <view wx:for="{{pending}}" wx:key="id" class="pending-row">
+          <button class="pending-open" data-id="{{item.id}}" bindtap="openPending" disabled="{{refreshing || outdated}}" aria-label="查看{{item.title}}">
+            <image wx:if="{{item.logo}}" class="bank-logo pending-logo" src="{{item.logo}}" mode="aspectFit" />
+            <view wx:else class="bank-placeholder pending-logo">{{item.bank}}</view>
+            <view class="pending-main">
+              <text class="pending-title">{{item.title}}</text>
+              <text class="record-subtitle">{{item.cardName || item.bank}} · {{item.period}}</text>
+              <text class="expected {{item.late ? 'late' : ''}}">{{item.expected}}{{item.late ? ' · 可向银行核实' : ''}}</text>
+            </view>
+            <text class="pending-amount">{{item.reward}}</text>
+          </button>
+          <button class="pending-action" data-id="{{item.id}}" bindtap="confirmPending" disabled="{{refreshing || outdated}}"><text class="pending-action-label">{{item.recordAction}}</text></button>
+        </view>
+        <view wx:if="{{!pending.length}}" class="list-empty">{{currencies[currencyIndex].name}}暂无待确认收益</view>
+      </view>
+      <text class="pending-note">收到返现、积分、券码或礼品后确认；立减享受后记录优惠。跨月未确认的记录会一直保留。</text>
+
+      <view class="section-heading received-section">
+        <text class="section-title">到账记录</text>
+        <text class="section-count">{{monthShortLabel}}</text>
+        <text wx:if="{{received.length}}" class="section-hint">点击可更正</text>
+      </view>
+      <view class="record-card-list ledger-list">
+        <button wx:for="{{received}}" wx:key="id" class="ledger-row" data-id="{{item.id}}" bindtap="editReceived" disabled="{{refreshing || outdated}}" aria-label="更正{{item.title}}的{{item.kindLabel}}记录">
+          <text class="ledger-date">{{item.date}}</text>
+          <image wx:if="{{item.logo}}" class="bank-logo ledger-logo" src="{{item.logo}}" mode="aspectFit" />
+          <view wx:else class="bank-placeholder ledger-logo">{{item.bank}}</view>
+          <view class="ledger-main">
+            <text class="ledger-title">{{item.title}}</text>
+            <text class="record-subtitle">{{item.cardName || item.bank}} · {{item.period}} · {{item.kindLabel}}</text>
+          </view>
+          <text class="ledger-amount">{{item.amountPrefix}}{{item.amount}}</text>
+        </button>
+        <view wx:if="{{!received.length}}" class="empty income-empty">
+          <view class="empty-title">这个月还没有收益记录</view>
+          <text>{{pendingCount ? '返现到账或享受优惠后，记录实际金额。' : '可以切换月份查看，或找一项活动参加。'}}</text>
+          <button wx:if="{{pendingCount}}" class="secondary" data-tab="pending" bindtap="selectTab">查看待确认</button>
+          <button wx:else class="secondary" bindtap="openActivities">浏览活动</button>
+        </view>
+      </view>
+      <text wx:if="{{loadMoreError}}" class="pagination-error" role="alert">{{loadMoreError}}</text>
+      <button wx:if="{{nextCursor}}" class="load-more" loading="{{loadingMore}}" disabled="{{loadingMore || refreshing || outdated}}" bindtap="loadMore">{{loadMoreError ? '重试加载更多' : '加载更多记录'}}</button>
+      <text class="income-note">返现按到账日期、立减按享受优惠日期统计。积分单独记录，不计入金额合计；不同币种分别统计。</text>
+    </block>
+  </view>
 </view>

@@ -1,4 +1,4 @@
-import { ActivityDraft, ActivityLead, Entrance } from '../shared/contracts';
+import { ActivityCycle, ActivityDraft, ActivityLead, Entrance } from '../shared/contracts';
 import { assertDate } from './calendar';
 import { DomainError } from './errors';
 import { banks, issuers } from '../shared/catalog';
@@ -88,7 +88,76 @@ export function validateLead(input: unknown): ActivityLead {
   const imageIds = list(source.imageIds, 'imageIds', 6).map(value => id(value, 'imageIds'));
   if (new Set(imageIds).size !== imageIds.length) fail('imageIds', '请移除重复图片');
   if (!sourceUrl && !sourceNote && !imageIds.length) fail('sourceNote', '请提供来源链接、银行 App 路径说明或规则截图');
-  return { title: text(source.title, 'title', 60, true), bankId, sourceUrl, sourceNote, imageIds };
+  return { title: text(source.title, 'title', 60, true), bankId, sourceUrl, sourceNote, imageIds,
+    ...(source.rules === undefined ? {} : { rules: validatePartialRules(source.rules) }) };
+}
+
+export function validateCycle(input: unknown): ActivityCycle {
+  const source = object(input, 'cycle');
+  const t = choice(source.t, ['once', 'week', 'month', 'custom'] as const, 'cycle.t');
+  if (t === 'once') {
+    const start = assertDate(source.start, 'cycle.start');
+    const end = assertDate(source.end, 'cycle.end');
+    if (end < start) fail('cycle.end', '结束日期不能早于开始日期');
+    return { t, start, end };
+  }
+  if (t === 'week') {
+    const weekday = integer(source.weekday, 0, 6, 'cycle.weekday') as 0 | 1 | 2 | 3 | 4 | 5 | 6;
+    const days = source.days === undefined ? undefined : list(source.days, 'cycle.days', 7).map(day => integer(day, 0, 6, 'cycle.days'));
+    if (days && new Set(days).size !== days.length) fail('cycle.days', '可用日期不能重复');
+    return { t, weekday, ...(days === undefined ? {} : { days }) };
+  }
+  if (t === 'month') return { t, day: integer(source.day, 1, 28, 'cycle.day') };
+  const unit = choice(source.unit, ['day', 'week', 'month'] as const, 'cycle.unit');
+  return { t, n: integer(source.n, 1, unit === 'day' ? 90 : 12, 'cycle.n'), unit, anchor: assertDate(source.anchor, 'cycle.anchor') };
+}
+
+export function validatePartialRules(input: unknown): Partial<ActivityDraft> {
+  const source = object(input, 'rules');
+  const output: Partial<ActivityDraft> = {};
+  const allowed = new Set(['rewardKind', 'rewardMinor', 'currency', 'cycle', 'frequency', 'startsOn', 'endsOn', 'conditions', 'entrance', 'target', 'unit', 'cardDescription', 'requiresRegistration', 'requiresInvitation', 'scope', 'cardKind', 'issuerIds', 'networks']);
+  if (Object.keys(source).some(key => !allowed.has(key))) fail('rules', '规则信息包含不支持的字段');
+  if (source.rewardKind !== undefined) output.rewardKind = choice(source.rewardKind, ['cashback', 'discount', 'voucher', 'points', 'gift'] as const, 'rewardKind');
+  if (source.rewardMinor !== undefined) output.rewardMinor = integer(source.rewardMinor, 0, 100000000000, 'rewardMinor');
+  if (output.rewardKind === 'points' && output.rewardMinor !== undefined && output.rewardMinor % 100 !== 0) fail('rewardMinor', '积分必须为整数');
+  if (source.currency !== undefined) output.currency = choice(source.currency, ['CNY', 'HKD', 'MOP'] as const, 'currency');
+  if (source.frequency !== undefined) output.frequency = choice(source.frequency, ['once', 'monthly', 'quarterly', 'yearly'] as const, 'frequency');
+  if (source.cycle !== undefined) output.cycle = validateCycle(source.cycle);
+  if (source.startsOn !== undefined) output.startsOn = assertDate(source.startsOn, 'startsOn');
+  if (source.endsOn !== undefined) output.endsOn = assertDate(source.endsOn, 'endsOn');
+  if (output.startsOn && output.endsOn && output.endsOn < output.startsOn) fail('endsOn', '结束日期不能早于开始日期');
+  if (output.cycle?.t === 'once' && ((output.startsOn && output.startsOn !== output.cycle.start) || (output.endsOn && output.endsOn !== output.cycle.end))) fail('cycle', '单次周期应与活动时间一致');
+  if (output.cycle?.t === 'custom' && output.startsOn && output.cycle.anchor !== output.startsOn) fail('cycle.anchor', '自定义周期应从活动开始日期起算');
+  if (source.conditions !== undefined) output.conditions = text(source.conditions, 'conditions', 4000);
+  if (source.entrance !== undefined) output.entrance = validateEntrance(source.entrance, false);
+  if (source.unit !== undefined) output.unit = text(source.unit, 'unit', 16, true);
+  if (source.target !== undefined) output.target = targetValue(source.target, output.unit || '笔');
+  if (source.cardDescription !== undefined) output.cardDescription = text(source.cardDescription, 'cardDescription', 200);
+  if (source.requiresRegistration !== undefined) output.requiresRegistration = boolean(source.requiresRegistration, 'requiresRegistration');
+  if (source.requiresInvitation !== undefined) output.requiresInvitation = boolean(source.requiresInvitation, 'requiresInvitation');
+  if (source.scope !== undefined) output.scope = choice(source.scope, ['user', 'card'] as const, 'scope');
+  if (source.cardKind !== undefined) output.cardKind = choice(source.cardKind, ['credit', 'debit', 'any'] as const, 'cardKind');
+  if (source.issuerIds !== undefined) {
+    output.issuerIds = list(source.issuerIds, 'issuerIds', 40).map(value => id(value, 'issuerIds'));
+    if (new Set(output.issuerIds).size !== output.issuerIds.length || output.issuerIds.some(value => !issuers.some(issuer => issuer.id === value))) fail('issuerIds', '请选择有效发卡机构');
+  }
+  if (source.networks !== undefined) {
+    output.networks = list(source.networks, 'networks', 5).map(value => choice(value, ['visa', 'mastercard', 'unionpay', 'amex', 'other'] as const, 'networks'));
+    if (new Set(output.networks).size !== output.networks.length) fail('networks', '卡组织不能重复');
+  }
+  return output;
+}
+
+export function validateRecognitionFields(input: unknown): Partial<ActivityDraft> {
+  const source = object(input, 'fields');
+  const { title, bankId, ...rules } = source;
+  const output = validatePartialRules(rules);
+  if (title !== undefined) output.title = text(title, 'title', 80, true);
+  if (bankId !== undefined) {
+    output.bankId = id(bankId, 'bankId');
+    if (!banks.some(bank => bank.id === output.bankId)) fail('bankId', '请选择有效银行');
+  }
+  return output;
 }
 
 function validateEntrance(value: unknown, publish: boolean): Entrance {
@@ -129,6 +198,10 @@ export function validateDraft(input: unknown, publish = false): ActivityDraft {
   const startsOn = assertDate(source.startsOn, 'startsOn');
   const endsOn = assertDate(source.endsOn, 'endsOn');
   if (endsOn < startsOn) fail('endsOn', '结束日期不能早于开始日期');
+  const cycle = source.cycle === undefined ? undefined : validateCycle(source.cycle);
+  if (cycle?.t === 'once' && (cycle.start !== startsOn || cycle.end !== endsOn)) fail('cycle', '单次周期应与活动时间一致');
+  if (cycle?.t === 'custom' && cycle.anchor !== startsOn) fail('cycle.anchor', '自定义周期应从活动开始日期起算');
+  if (source.rewardKind === 'points' && typeof source.rewardMinor === 'number' && source.rewardMinor % 100 !== 0) fail('rewardMinor', '积分必须为整数');
   const issuerIds = list(source.issuerIds, 'issuerIds', 40).map(value => id(value, 'issuerIds'));
   if (new Set(issuerIds).size !== issuerIds.length) fail('issuerIds', '发卡机构不能重复');
   const bankId = id(source.bankId, 'bankId');
@@ -148,13 +221,14 @@ export function validateDraft(input: unknown, publish = false): ActivityDraft {
     cardKind: choice(source.cardKind, ['credit', 'debit', 'any'] as const, 'cardKind'),
     cardDescription: text(source.cardDescription, 'cardDescription', 200),
     frequency: choice(source.frequency, ['once', 'monthly', 'quarterly', 'yearly'] as const, 'frequency'),
+    ...(cycle ? { cycle } : {}),
     startsOn,
     endsOn,
     target: targetValue(source.target, unit),
     unit,
     currency: choice(source.currency, ['CNY', 'HKD', 'MOP'] as const, 'currency'),
     rewardMinor: integer(source.rewardMinor, publish ? 1 : 0, 100000000000, 'rewardMinor'),
-    rewardKind: choice(source.rewardKind, ['cashback', 'discount'] as const, 'rewardKind'),
+    rewardKind: choice(source.rewardKind, ['cashback', 'discount', 'voucher', 'points', 'gift'] as const, 'rewardKind'),
     scope: choice(source.scope, ['user', 'card'] as const, 'scope'),
     requiresRegistration: boolean(source.requiresRegistration, 'requiresRegistration'),
     requiresInvitation: boolean(source.requiresInvitation, 'requiresInvitation'),

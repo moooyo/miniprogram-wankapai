@@ -353,6 +353,9 @@ Page({
     this.refreshErrors(['bankId', 'issuerId', 'billingAccountId', 'nickname']);
     this.markChanged();
   },
+  selectBank(event: WechatMiniprogram.TouchEvent) { this.changeBank({ detail: { value: String(event.currentTarget.dataset.index) } } as WechatMiniprogram.PickerChange); },
+  selectNetwork(event: WechatMiniprogram.TouchEvent) { this.changeNetwork({ detail: { value: String(event.currentTarget.dataset.index) } } as WechatMiniprogram.PickerChange); },
+  selectRemind(event: WechatMiniprogram.TouchEvent) { this.changeRemind({ detail: { value: String(event.currentTarget.dataset.index) } } as WechatMiniprogram.PickerChange); },
   changeIssuer(event: WechatMiniprogram.PickerChange) {
     if (this.isBusy() || this.data.editing) return;
     this.setData({ issuerIndex: Number(event.detail.value), billingIndex: 0 }); this.updateBillingChoices(''); this.resetBillingTarget();

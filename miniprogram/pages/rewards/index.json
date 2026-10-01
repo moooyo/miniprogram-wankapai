@@ -1,1 +1,8 @@
-{"navigationBarTitleText":"收益","enablePullDownRefresh":true}
+{
+  "navigationBarTitleText": "收益",
+  "navigationStyle": "custom",
+  "enablePullDownRefresh": true,
+  "usingComponents": {
+    "design-nav": "/components/design-nav/index"
+  }
+}

@@ -1,29 +1,40 @@
 import type { Card, Commands, Entitlement, EntitlementDraft, EntitlementKind, LoungeAccess, Transferability } from '../../../shared/contracts';
+import { banks } from '../../../shared/catalog';
 import { api, ensureSession } from '../../services/api';
 import { cardLabel } from '../../services/card-labels';
 import { confirmDraftRecovery, createCommandIntent, getDraftRevision, loadDraft, removeDraft, saveDraft } from '../../services/form-draft';
 import { navigateBackOr } from '../../services/navigation';
 
-type FormDraft = Omit<EntitlementDraft, 'totalUses' | 'initialUsed'> & { totalUses: string; initialUsed: string };
+type FormDraft = Omit<EntitlementDraft, 'totalUses' | 'initialUsed' | 'pointsBalance'> & { totalUses: string; initialUsed: string; pointsBalance?: string };
 type LoungeForm = Omit<LoungeAccess, 'advanceHours' | 'unitsPerVisit' | 'supportedBanks'> & { advanceHours: string; unitsPerVisit: string; supportedBanksInput: string };
 type SavePayload = Commands['entitlement.save'];
-type Section = 'basic' | 'quota' | 'transfer' | 'lounges';
+type Section = 'basic' | 'quota' | 'content' | 'transfer' | 'lounges';
 interface PendingSave { payload: SavePayload; intentKey: string; }
 interface StoredDraft { draft: FormDraft; expectedVersion: number | null; intentKey: string; pending: PendingSave | null; }
 interface InputEvent { currentTarget: { dataset: { field: string } }; detail: { value: string }; }
+interface SelectEvent { currentTarget: { dataset: { field: string; index?: string | number } }; detail?: { value?: string | number }; }
 interface FieldEvent { currentTarget: { dataset: { field: string } }; }
-const kinds: { value: EntitlementKind; label: string }[] = [{ value: 'lounge', label: '机场贵宾厅' }, { value: 'health_check', label: '体检' }, { value: 'other', label: '其他权益' }];
+const kinds: { value: EntitlementKind; label: string }[] = [{ value: 'lounge', label: '贵宾厅' }, { value: 'delay_insurance', label: '延误险' }, { value: 'airport_transfer', label: '接送机' }, { value: 'health_check', label: '体检' }, { value: 'car_wash', label: '洗车' }, { value: 'points', label: '积分' }, { value: 'other', label: '其他' }];
+const loungePrograms: { value: NonNullable<EntitlementDraft['loungeProgram']>; label: string }[] = [{ value: 'dragon', label: '龙腾' }, { value: 'pp', label: 'Priority Pass' }, { value: 'plaza', label: '环亚' }, { value: 'unionpay', label: '银联' }, { value: 'other', label: '其他' }];
+const titlePlaceholders: Record<EntitlementKind, string> = { lounge: '例如：年度机场贵宾厅 6 次', delay_insurance: '例如：航班延误险', airport_transfer: '例如：机场接送 2 次', health_check: '例如：年度体检 1 次', car_wash: '例如：精致洗车 3 次', points: '例如：信用卡积分', other: '例如：酒店延住、视频会员' };
 const transfers: { value: Transferability; label: string }[] = [{ value: 'allowed', label: '明确可转让' }, { value: 'grey', label: '可转让（灰）' }, { value: 'not_allowed', label: '不可转让' }];
 const zones: { value: LoungeAccess['zone']; label: string }[] = [{ value: 'unknown', label: '待核实' }, { value: 'domestic', label: '国内出发' }, { value: 'international', label: '国际／港澳台出发' }, { value: 'both', label: '国内及国际' }];
 const reservations: { value: LoungeAccess['reservation']; label: string }[] = [{ value: 'unknown', label: '待核实' }, { value: 'required', label: '需要预约' }, { value: 'not_required', label: '无需预约' }];
 const customerScopes: { value: LoungeAccess['customerScope']; label: string }[] = [{ value: 'unknown', label: '待核实' }, { value: 'all', label: '符合此权益的所有客户' }, { value: 'local_bank', label: '仅本地银行客户' }, { value: 'specified', label: '仅指定客户' }];
-const fieldLabels: Record<string, string> = { title: '权益名称', kind: '权益类型', cardId: '关联卡片', provider: '提供方', totalUses: '总次数', initialUsed: '录入前已使用', startsOn: '生效日期', endsOn: '到期日期', transferability: '转让规则', transferNote: '转让说明', notes: '补充说明', lounges: '可用贵宾厅', airportName: '机场名称', airportCode: '机场三字码', city: '城市', loungeName: '贵宾厅名称', terminal: '航站楼', zone: '出发区域', supportedBanks: '支持的银行', supportedBanksInput: '支持的银行', reservation: '预约要求', advanceHours: '提前预约小时数', reservationNote: '预约说明', customerScope: '适用客户', customerNote: '客户限制说明', guestNote: '同行人规则', openingHours: '营业时间', location: '位置', unitsPerVisit: '每次扣除次数', sourceNote: '规则来源', verifiedOn: '核实日期' };
+const fieldLabels: Record<string, string> = { description: '权益内容', pointsBalance: '积分余额', loungeProgram: '使用通道', title: '权益名称', kind: '权益类型', cardId: '关联卡片', provider: '提供方', totalUses: '总次数', initialUsed: '录入前已使用', startsOn: '生效日期', endsOn: '到期日期', transferability: '转让规则', transferNote: '转让说明', notes: '补充说明', lounges: '可用贵宾厅', airportName: '机场名称', airportCode: '机场三字码', city: '城市', loungeName: '贵宾厅名称', terminal: '航站楼', zone: '出发区域', supportedBanks: '支持的银行', supportedBanksInput: '支持的银行', reservation: '预约要求', advanceHours: '提前预约小时数', reservationNote: '预约说明', customerScope: '适用客户', customerNote: '客户限制说明', guestNote: '同行人规则', openingHours: '营业时间', location: '位置', unitsPerVisit: '每次扣除次数', sourceNote: '规则来源', verifiedOn: '核实日期' };
 const mainTextFields = ['title', 'provider', 'notes', 'transferNote', 'totalUses', 'initialUsed', 'startsOn', 'endsOn'];
+const optionalTextFields = ['description', 'pointsBalance'];
 const loungeTextFields = ['airportName', 'airportCode', 'city', 'loungeName', 'terminal', 'advanceHours', 'reservationNote', 'customerNote', 'guestNote', 'openingHours', 'location', 'unitsPerVisit', 'sourceNote', 'verifiedOn'];
 const definiteRejections = new Set(['INVALID_INPUT', 'INVALID_DATE', 'NOT_FOUND', 'CONFLICT', 'IMMUTABLE', 'VERSION_CONFLICT', 'INVALID_STATE', 'FORBIDDEN', 'UNAUTHORIZED', 'CARD_ARCHIVED', 'INSUFFICIENT_USES', 'ENTITLEMENT_ARCHIVED']);
 
 function emptyDraft(kind: EntitlementKind = 'lounge', cardId = '', today = ''): FormDraft {
-  return { title: '', kind, cardId, provider: '', totalUses: '', initialUsed: '0', startsOn: today, endsOn: '', transferability: 'not_allowed', transferNote: '', notes: '', lounges: [] };
+  return { title: '', kind, cardId, provider: '', totalUses: countedKind(kind) ? '' : '0', initialUsed: '0', startsOn: today, endsOn: '', transferability: 'not_allowed', transferNote: '', notes: '', lounges: [] };
+}
+function countedKind(kind: EntitlementKind): boolean { return !['delay_insurance', 'points'].includes(kind); }
+function expiryChoicesFor(today: string) {
+  if (!validDate(today)) return [] as { label: string; value: string }[];
+  const year = Number(today.slice(0, 4));
+  return [{ label: '今年底', value: `${year}-12-31` }, { label: '明年 3 月底', value: `${year + 1}-03-31` }, { label: '明年 6 月底', value: `${year + 1}-06-30` }, { label: '明年底', value: `${year + 1}-12-31` }];
 }
 function emptyLounge(): LoungeForm {
   return { id: createCommandIntent(), airportName: '', airportCode: '', city: '', loungeName: '', terminal: '', zone: 'unknown', supportedBanksInput: '', reservation: 'unknown', advanceHours: '0', reservationNote: '', customerScope: 'unknown', customerNote: '', guestNote: '', openingHours: '', location: '', unitsPerVisit: '1', sourceNote: '', verifiedOn: '' };
@@ -39,10 +50,13 @@ function loungeFieldName(field: string): string {
   return /^supportedBanks(?:\.\d+)?$/.test(field) ? 'supportedBanksInput' : field;
 }
 function formFrom(value: EntitlementDraft): FormDraft {
-  return { title: value.title, kind: value.kind, cardId: value.cardId, provider: value.provider, totalUses: String(value.totalUses), initialUsed: String(value.initialUsed), startsOn: value.startsOn, endsOn: value.endsOn, transferability: value.transferability, transferNote: value.transferNote, notes: value.notes, lounges: value.lounges.map(item => ({ ...item })) };
+  return { title: value.title, kind: value.kind, cardId: value.cardId, provider: value.provider, totalUses: String(value.totalUses), initialUsed: String(value.initialUsed), startsOn: value.startsOn, endsOn: value.endsOn, transferability: value.transferability, transferNote: value.transferNote, notes: value.notes, lounges: value.lounges.map(item => ({ ...item })),
+    ...(value.description !== undefined ? { description: value.description } : {}), ...(value.pointsBalance !== undefined ? { pointsBalance: String(value.pointsBalance) } : {}), ...(value.loungeProgram !== undefined ? { loungeProgram: value.loungeProgram } : {}) };
 }
 function toDraft(value: FormDraft): EntitlementDraft {
-  return { ...value, title: value.title.trim(), provider: value.provider.trim(), notes: value.notes.trim(), transferNote: value.transferNote.trim(), totalUses: Number(value.totalUses), initialUsed: Number(value.initialUsed), lounges: value.lounges.map(item => ({ ...item })) };
+  const { description, pointsBalance, loungeProgram, ...fields } = value;
+  return { ...fields, title: value.title.trim(), provider: value.provider.trim(), notes: value.notes.trim(), transferNote: value.transferNote.trim(), totalUses: countedKind(value.kind) ? Number(value.totalUses) : 0, initialUsed: countedKind(value.kind) ? Number(value.initialUsed) : 0, lounges: value.lounges.map(item => ({ ...item })),
+    ...(description !== undefined ? { description: description.trim() } : {}), ...(pointsBalance !== undefined && pointsBalance !== '' ? { pointsBalance: Number(pointsBalance) } : {}), ...(loungeProgram !== undefined ? { loungeProgram } : {}) };
 }
 function whole(value: string, minimum: number, maximum = 9999): boolean {
   return /^\d+$/.test(value) && Number.isSafeInteger(Number(value)) && Number(value) >= minimum && Number(value) <= maximum;
@@ -64,7 +78,9 @@ function validForm(value: unknown): value is FormDraft {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const item = value as FormDraft;
   return [...mainTextFields, 'cardId'].every(field => typeof (item as unknown as Record<string, unknown>)[field] === 'string')
+    && optionalTextFields.every(field => (item as unknown as Record<string, unknown>)[field] === undefined || typeof (item as unknown as Record<string, unknown>)[field] === 'string')
     && kinds.some(row => row.value === item.kind) && transfers.some(row => row.value === item.transferability)
+    && (item.loungeProgram === undefined || loungePrograms.some(row => row.value === item.loungeProgram))
     && Array.isArray(item.lounges) && item.lounges.length <= 30 && item.lounges.every(validLounge);
 }
 function signature(value: unknown): string {
@@ -72,8 +88,10 @@ function signature(value: unknown): string {
   if (value && typeof value === 'object') return '{' + Object.entries(value).filter(([, item]) => item !== undefined).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => JSON.stringify(key) + ':' + signature(item)).join(',') + '}';
   return JSON.stringify(value) ?? 'null';
 }
-function sectionFor(field: string): Section {
+function sectionFor(field: string, kind?: EntitlementKind): Section {
   if (['totalUses', 'initialUsed', 'startsOn', 'endsOn'].includes(field)) return 'quota';
+  if (['description', 'pointsBalance'].includes(field)) return 'content';
+  if (field === 'notes' && kind && !countedKind(kind)) return 'content';
   if (['transferability', 'transferNote', 'notes'].includes(field)) return 'transfer';
   if (field.startsWith('lounges')) return 'lounges';
   return 'basic';
@@ -105,7 +123,9 @@ Page({
     loading: true, ready: false, saving: false, reloading: false, identityChanged: false, conflict: false,
     loadError: '', formError: '', notice: '', today: '', dirty: false, draftSaved: false, pending: false, saved: false,
     draft: emptyDraft(), record: null as Entitlement | null, expectedVersion: null as number | null, baseSignature: '', intentKey: '',
-    cards: [] as Card[], cardChoices: [{ id: '', label: '不关联卡片' }], cardIndex: 0, kinds, kindIndex: 0, transfers, transferIndex: 2,
+    cards: [] as Card[], cardChoices: [{ id: '', label: '不关联卡片', logo: '' }], cardIndex: 0, kinds, kindIndex: 0, loungePrograms, loungeProgramIndex: -1, transfers, transferIndex: 2,
+    isCounted: true, titlePlaceholder: titlePlaceholders.lounge,
+    expiryChoices: [] as ReturnType<typeof expiryChoicesFor>, canDecreaseTotal: false, canIncreaseTotal: true, canDecreaseInitial: false, canIncreaseInitial: false,
     openSection: 'basic' as Section | '', remaining: '—', trackedUsed: 0, errors: {} as Record<string, string>, errorSummary: [] as ReturnType<typeof summaryFor>, focusField: '',
     loungeRows: [] as { id: string; title: string; location: string; banks: string; reservation: string; customer: string; error: string }[],
     loungeVisible: false, loungeIndex: -1, loungeDraft: null as LoungeForm | null, loungeBase: '', loungeAdvanced: false,
@@ -127,7 +147,7 @@ Page({
   onLoad(options: Record<string, string | undefined>) {
     const initialKind = kinds.find(item => item.value === options.kind)?.value || 'lounge';
     this.setData({ id: options.id || '', editing: !!options.id, initialKind, initialCardId: options.cardId || '' });
-    wx.setNavigationBarTitle({ title: options.id ? '编辑权益' : '添加权益' });
+    wx.setNavigationBarTitle({ title: options.id ? '编辑权益' : '登记权益' });
     void this.load();
   },
   onShow() {
@@ -235,10 +255,10 @@ Page({
     const trackedUsed = this.data.record ? this.data.record.usedUses - this.data.record.initialUsed : 0;
     const remaining = whole(draft.totalUses, 0) && whole(draft.initialUsed, 0) ? String(Number(draft.totalUses) - Number(draft.initialUsed) - trackedUsed) : '—';
     const cards = this.data.cards.filter(card => !card.archivedAt && card.ownerId === this.data.ownerId);
-    const cardChoices = [{ id: '', label: '不关联卡片' }, ...cards.map(card => ({ id: card.id, label: cardLabel(card.id, this.data.cards) }))];
+    const cardChoices = [{ id: '', label: '不关联卡片', logo: '' }, ...cards.map(card => ({ id: card.id, label: cardLabel(card.id, this.data.cards), logo: banks.find(bank => bank.id === card.bankId)?.logo || '' }))];
     if (draft.cardId && !cardChoices.some(card => card.id === draft.cardId)) {
       const original = this.data.cards.find(card => card.id === draft.cardId && card.ownerId === this.data.ownerId && card.id === this.data.record?.cardId);
-      cardChoices.push({ id: draft.cardId, label: original ? cardLabel(original.id, this.data.cards) : '原关联卡片已不可用，请重新选择' });
+      cardChoices.push({ id: draft.cardId, label: original ? cardLabel(original.id, this.data.cards) : '原关联卡片已不可用，请重新选择', logo: original ? banks.find(bank => bank.id === original.bankId)?.logo || '' : '' });
     }
     const loungeRows = draft.lounges.map((item, index) => ({ id: item.id, title: item.loungeName,
       location: [item.city, item.airportName, item.airportCode, item.terminal, zones.find(zone => zone.value === item.zone)?.label].filter(Boolean).join(' · '),
@@ -248,11 +268,21 @@ Page({
       error: Object.entries(this.data.errors).find(([field]) => field.startsWith(`lounges.${index}.`))?.[1] || '',
     }));
     this.setData({ trackedUsed, remaining, cardChoices, cardIndex: Math.max(0, cardChoices.findIndex(card => card.id === draft.cardId)),
-      kindIndex: kinds.findIndex(kind => kind.value === draft.kind), transferIndex: transfers.findIndex(item => item.value === draft.transferability), loungeRows });
+      kindIndex: kinds.findIndex(kind => kind.value === draft.kind), isCounted: countedKind(draft.kind), titlePlaceholder: titlePlaceholders[draft.kind] || titlePlaceholders.other,
+      expiryChoices: expiryChoicesFor(this.data.today), canDecreaseTotal: whole(draft.totalUses, 1) && whole(draft.initialUsed, 0) && Number(draft.totalUses) > Number(draft.initialUsed) + trackedUsed,
+      canIncreaseTotal: draft.totalUses === '' || whole(draft.totalUses, 0, 9998), canDecreaseInitial: whole(draft.initialUsed, 1),
+      canIncreaseInitial: whole(draft.initialUsed, 0, 9998) && whole(draft.totalUses, 0) && Number(draft.initialUsed) + trackedUsed < Number(draft.totalUses),
+      loungeProgramIndex: loungePrograms.findIndex(item => item.value === draft.loungeProgram), transferIndex: transfers.findIndex(item => item.value === draft.transferability), loungeRows });
   },
   changeDraft(patch: Partial<FormDraft>, field: string) {
     const errors = { ...this.data.errors };
     delete errors[field];
+    if (field === 'kind' && patch.kind) {
+      if (!countedKind(patch.kind)) { delete errors.totalUses; delete errors.initialUsed; }
+      else delete errors.description;
+      if (patch.kind !== 'points') delete errors.pointsBalance;
+      if (patch.kind !== 'lounge') delete errors.loungeProgram;
+    }
     this.setData({ draft: { ...this.data.draft, ...patch }, errors, errorSummary: summaryFor(errors), focusField: '', formError: '' });
     this.refreshDerived();
     this.persistDraft();
@@ -260,19 +290,52 @@ Page({
   input(event: InputEvent) {
     if (!this.canEdit()) return;
     const field = event.currentTarget.dataset.field;
-    if (mainTextFields.includes(field)) this.changeDraft({ [field]: event.detail.value }, field);
+    if (['totalUses', 'initialUsed'].includes(field) && !countedKind(this.data.draft.kind)) return;
+    if (mainTextFields.includes(field) || optionalTextFields.includes(field)) this.changeDraft({ [field]: event.detail.value }, field);
   },
-  select(event: InputEvent) {
+  select(event: SelectEvent) {
     if (!this.canEdit()) return;
-    const field = event.currentTarget.dataset.field, index = Number(event.detail.value);
-    if (field === 'kind' && kinds[index]) this.changeDraft({ kind: kinds[index].value }, field);
+    const field = event.currentTarget.dataset.field, rawIndex = event.currentTarget.dataset.index ?? event.detail?.value;
+    if (rawIndex === undefined || !/^\d+$/.test(String(rawIndex))) return;
+    const index = Number(rawIndex);
+    if (!Number.isSafeInteger(index)) return;
+    if (field === 'kind' && kinds[index]) {
+      const kind = kinds[index].value, wasCounted = countedKind(this.data.draft.kind), changingKind = kind !== this.data.draft.kind;
+      this.changeDraft({ kind, ...(!countedKind(kind) ? { totalUses: '0', initialUsed: '0' } : !wasCounted ? { totalUses: '', initialUsed: '0' } : {}),
+        ...(changingKind && kind !== 'points' ? { pointsBalance: undefined } : {}), ...(changingKind && kind !== 'lounge' ? { loungeProgram: undefined } : {}) }, field);
+    }
     if (field === 'cardId' && this.data.cardChoices[index]) this.changeDraft({ cardId: this.data.cardChoices[index].id }, field);
     if (field === 'transferability' && transfers[index]) this.changeDraft({ transferability: transfers[index].value }, field);
+    if (field === 'loungeProgram' && this.data.draft.kind === 'lounge' && loungePrograms[index]) this.changeDraft({ loungeProgram: loungePrograms[index].value }, field);
+  },
+  adjustCount(event: { currentTarget: { dataset: { field: string; delta: string | number } } }) {
+    if (!this.canEdit() || !countedKind(this.data.draft.kind)) return;
+    const { field, delta: rawDelta } = event.currentTarget.dataset;
+    if (!['totalUses', 'initialUsed'].includes(field) || !['-1', '1'].includes(String(rawDelta))) return;
+    const draft = this.data.draft, value = field === 'totalUses' ? draft.totalUses : draft.initialUsed;
+    if (value !== '' && !whole(value, 0)) return;
+    const next = Number(value || '0') + Number(rawDelta);
+    if (!Number.isSafeInteger(next) || next < 0 || next > 9999) return;
+    if (field === 'totalUses' && (!whole(draft.initialUsed, 0) || next < Number(draft.initialUsed) + this.data.trackedUsed)) return;
+    if (field === 'initialUsed' && (!whole(draft.totalUses, 0) || next + this.data.trackedUsed > Number(draft.totalUses))) return;
+    this.changeDraft({ [field]: String(next) }, field);
+  },
+  chooseExpiry(event: { currentTarget: { dataset: { index: string | number } } }) {
+    if (!this.canEdit()) return;
+    const rawIndex = event.currentTarget.dataset.index;
+    if (!/^\d+$/.test(String(rawIndex))) return;
+    const index = Number(rawIndex), choice = this.data.expiryChoices[index];
+    if (!Number.isSafeInteger(index) || !choice) return;
+    if (validDate(this.data.draft.startsOn) && choice.value < this.data.draft.startsOn) {
+      this.showErrors({ ...this.data.errors, endsOn: '到期日期不能早于生效日期。' });
+      return;
+    }
+    this.changeDraft({ endsOn: choice.value }, 'endsOn');
   },
   toggleSection(event: { currentTarget: { dataset: { section: Section } } }) {
     if (!this.canEdit()) return;
     const section = event.currentTarget.dataset.section;
-    if (['basic', 'quota', 'transfer', 'lounges'].includes(section)) this.setData({ openSection: this.data.openSection === section ? '' : section });
+    if (['basic', 'quota', 'content', 'transfer', 'lounges'].includes(section)) this.setData({ openSection: this.data.openSection === section ? '' : section });
   },
   openLounge(event: { currentTarget: { dataset: { index?: string | number } } }) {
     if (!this.canEdit()) return;
@@ -353,10 +416,18 @@ Page({
   validationErrors(): Record<string, string> {
     const draft = this.data.draft, errors: Record<string, string> = {};
     if (!draft.title.trim()) errors.title = '请填写权益名称。';
+    if (!kinds.some(item => item.value === draft.kind)) errors.kind = '请选择有效的权益类型。';
     if (draft.cardId && !this.data.cards.some(card => card.id === draft.cardId && (!card.archivedAt || card.id === this.data.record?.cardId) && card.ownerId === this.data.ownerId)) errors.cardId = '请选择仍在卡包中的卡片，或选择不关联卡片。';
-    if (!whole(draft.totalUses, 0)) errors.totalUses = '请填写 0 至 9999 的整数总次数。';
-    if (!whole(draft.initialUsed, 0)) errors.initialUsed = '请填写 0 至 9999 的整数次数。';
-    if (!errors.totalUses && !errors.initialUsed && Number(draft.totalUses) < Number(draft.initialUsed) + this.data.trackedUsed) errors.totalUses = `总次数不能少于已使用的 ${Number(draft.initialUsed) + this.data.trackedUsed} 次。`;
+    if (countedKind(draft.kind)) {
+      if (!whole(draft.totalUses, 0)) errors.totalUses = '请填写 0 至 9999 的整数总次数。';
+      if (!whole(draft.initialUsed, 0)) errors.initialUsed = '请填写 0 至 9999 的整数次数。';
+      if (!errors.totalUses && !errors.initialUsed && Number(draft.totalUses) < Number(draft.initialUsed) + this.data.trackedUsed) errors.totalUses = `总次数不能少于已使用的 ${Number(draft.initialUsed) + this.data.trackedUsed} 次。`;
+    } else if (this.data.trackedUsed > 0) errors.kind = '已有使用记录的次数权益不能改为信息类权益。';
+    if (draft.description !== undefined && typeof draft.description !== 'string') errors.description = '请填写文字形式的权益内容。';
+    else if (draft.kind === 'delay_insurance' && !draft.description?.trim()) errors.description = '请填写延误险的保障内容。';
+    if (draft.pointsBalance !== undefined && draft.pointsBalance !== '' && !whole(draft.pointsBalance, 0, Number.MAX_SAFE_INTEGER)) errors.pointsBalance = '请填写非负的整数积分余额。';
+    else if (draft.kind === 'points' && !whole(draft.pointsBalance || '', 0, Number.MAX_SAFE_INTEGER)) errors.pointsBalance = '请填写非负的整数积分余额。';
+    if (draft.loungeProgram !== undefined && !loungePrograms.some(item => item.value === draft.loungeProgram)) errors.loungeProgram = '请选择有效的使用通道。';
     if (!validDate(draft.startsOn)) errors.startsOn = '请选择生效日期。';
     if (!validDate(draft.endsOn)) errors.endsOn = '请选择到期日期。';
     if (!errors.startsOn && !errors.endsOn && draft.endsOn < draft.startsOn) errors.endsOn = '到期日期不能早于生效日期。';
@@ -379,7 +450,7 @@ Page({
     if (!this.canEdit()) return;
     const field = event.currentTarget.dataset.field;
     const match = /^lounges\.(\d+)\.(.+)$/.exec(field);
-    this.setData({ openSection: sectionFor(field), focusField: '' }, () => {
+    this.setData({ openSection: sectionFor(field, this.data.draft.kind), focusField: '' }, () => {
       if (!this.isCurrentPage()) return;
       if (match) {
         this.openLounge({ currentTarget: { dataset: { index: Number(match[1]) } } });

@@ -24,5 +24,8 @@ const copy = {
 };
 
 export function benefitCopy(kind: BenefitKind = 'cashback') {
+  if (kind === 'voucher') return { ...copy.cashback, kind, amountLabel:'实际到账立减金', recordTitle:'确认立减金到账', pendingDescription:'收到立减金后确认实际金额和到账日期', expectedLabel:'预计立减金' };
+  if (kind === 'points') return { ...copy.cashback, kind, amountLabel:'实际到账积分', recordTitle:'确认积分到账', pendingDescription:'收到积分后确认数量和到账日期', expectedLabel:'预计积分' };
+  if (kind === 'gift') return { ...copy.cashback, kind, amountLabel:'实物参考价值', recordTitle:'确认礼品领取', recordAction:'确认领取', actualLabel:'参考价值', dateLabel:'领取日期', dateEvent:'领取', recordedStatus:'已领取', pendingStatus:'待领取', completedStatus:'已完成 · 待领取', recordSuccess:'已记录领取', expectedLabel:'礼品参考价值', pendingDescription:'收到礼品后记录领取日期和参考价值' };
   return copy[kind];
 }

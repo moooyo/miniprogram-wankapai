@@ -1,3 +1,8 @@
 {
-  "navigationBarTitleText": "添加权益"
+  "navigationStyle": "custom",
+  "navigationBarTitleText": "登记权益",
+  "usingComponents": {
+    "design-nav": "/components/design-nav/index",
+    "app-sheet": "/components/app-sheet/index"
+  }
 }

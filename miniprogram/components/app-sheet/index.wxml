@@ -1,7 +1,8 @@
 <view wx:if="{{show}}" class="sheet-layer">
   <view class="sheet-mask" bindtap="close" catchtouchmove="stop"></view>
-  <view class="sheet" role="dialog" aria-label="{{title}}" aria-modal="true">
-    <view class="sheet-head"><text class="sheet-title">{{title}}</text><button class="sheet-close" aria-label="关闭面板" bindtap="close" disabled="{{!dismissible}}">×</button></view>
+  <view class="sheet {{fullScreen ? 'full-screen' : ''}}" role="dialog" aria-label="{{title}}" aria-modal="true">
+    <view wx:if="{{fullScreen}}" class="sheet-head-full"><design-nav id="sheet-navigation" title="{{title}}" back custom-back="{{true}}" back-disabled="{{!dismissible}}" bindback="close"/></view>
+    <block wx:else><view class="sheet-handle" aria-hidden="true"/><view class="sheet-head"><text class="sheet-title">{{title}}</text><button class="sheet-close" aria-label="关闭面板" bindtap="close" disabled="{{!dismissible}}">×</button></view></block>
     <scroll-view class="sheet-body" style="height: {{bodyHeight}}px;" scroll-y enhanced scroll-into-view="{{scrollIntoView}}" show-scrollbar="{{false}}"><view class="sheet-content"><slot></slot></view></scroll-view>
   </view>
 </view>

@@ -1,103 +1,64 @@
+<design-nav title="{{readOnly ? '线索详情' : submissionId ? '修改活动线索' : '提交活动线索'}}" back />
 <view class="lead-page {{ready && !readOnly && !denied && !submitted ? 'with-dock' : ''}}">
   <view wx:if="{{loading}}" class="loading">正在读取活动线索…</view>
-  <view wx:elif="{{denied}}" class="empty-state">
-    <text class="empty-title">无法查看这份线索</text>
-    <text class="small-copy">你只能查看和修改自己提交的活动线索。</text>
-    <button class="text-button" bindtap="goBack">返回投稿列表</button>
-  </view>
-  <view wx:elif="{{!ready}}" class="empty-state">
-    <text class="empty-title">线索未能读取</text>
-    <text class="small-copy">{{error}}</text>
-    <button wx:if="{{fullSubmission}}" class="text-button" bindtap="viewFullSubmission">查看完整投稿</button>
-    <button wx:else class="text-button" bindtap="load">重新读取</button>
-  </view>
+  <view wx:elif="{{denied}}" class="empty-state"><text class="empty-title">无法查看这份线索</text><text class="small-copy">你只能查看和修改自己提交的活动线索。</text><button class="text-button" bindtap="goBack">返回投稿列表</button></view>
+  <view wx:elif="{{!ready}}" class="empty-state"><text class="empty-title">线索未能读取</text><text class="small-copy">{{error}}</text><button wx:if="{{fullSubmission}}" class="text-button" bindtap="viewFullSubmission">查看完整投稿</button><button wx:else class="text-button" bindtap="load">重新读取</button></view>
   <block wx:else>
-    <view class="lead-intro">
-      <text class="lead-title">{{readOnly ? '线索详情' : submissionId ? '修改活动线索' : '分享活动线索'}}</text>
-      <text class="small-copy">{{readOnly ? '你提供的线索已核实发布，以下保留提交时的内容。' : '银行、名称和一种来源即可，审核后公开。'}}</text>
+    <text class="lead-intro">{{readOnly ? '你提供的线索已核实发布，以下保留提交时的内容。' : '上传活动页截图可自动识别并填写。必填项为所属银行、活动名称及一种来源，审核通过后公开。'}}</text>
+    <view wx:if="{{submitted}}" class="status-notice"><text class="notice-title">线索已提交审核</text><text>运营会核实你提供的来源，补齐规则后再公开。</text><button class="text-button" bindtap="viewSubmissions">查看我的投稿</button></view>
+    <view wx:if="{{pendingCreationUnconfirmed && !saving && !submitted}}" class="status-notice"><text class="notice-title">上次提交结果尚未确认</text><text>内容暂时锁定，重试将确认原提交。</text><button class="text-button" bindtap="viewSubmissions">去我的投稿核对</button></view>
+    <view wx:if="{{!submitted && submission.status === 'pending'}}" class="status-notice"><text class="notice-title">运营核实中</text><text>线索正在审核，可继续补充来源或更正内容。</text></view>
+    <view wx:if="{{!submitted && submission.status === 'returned'}}" class="return-notice"><text class="notice-title">请补充以下信息</text><text>{{submission.reviewNote}}</text></view>
+    <view wx:if="{{submission.status === 'published'}}" class="status-notice"><text class="notice-title">已审核发布</text><button wx:if="{{submission.activityId}}" class="text-button" bindtap="viewActivity">查看公开活动</button></view>
+    <view wx:if="{{error || conflict}}" class="error-banner"><text>{{error || '线索已有更新，请读取最新版本。'}}</text><button wx:if="{{fullSubmission}}" class="text-button" bindtap="viewFullSubmission" disabled="{{saving || uploading || reloading || pendingCreationUnconfirmed}}">查看完整投稿</button><button wx:elif="{{conflict}}" class="text-button" bindtap="reloadLatest" loading="{{reloading}}" disabled="{{saving || uploading || reloading || pendingCreationUnconfirmed}}">读取最新线索</button></view>
+    <view class="form-section screenshot-section" id="field-imageIds">
+      <view class="section-heading-copy"><text class="section-title">活动截图（{{imageRows.length}}/6）</text><text class="section-copy">请保留活动名称、规则与时间，并遮挡姓名、卡号等个人信息。</text></view>
+      <view class="screenshot-grid">
+        <view wx:for="{{imageRows}}" wx:key="id" class="screenshot-card" bindtap="openShot" data-id="{{item.id}}" aria-label="查看{{item.label}}">
+          <image wx:if="{{item.url}}" class="screenshot-image" src="{{item.url}}" mode="aspectFill" />
+          <view wx:else class="screenshot-placeholder">{{loadingImages ? '读取中' : item.label}}</view>
+          <view wx:if="{{item.scanning}}" class="screenshot-scan"><view class="scan-line" /></view>
+          <text wx:if="{{item.recognized}}" class="recognized-shot">✓ 已识别</text>
+          <button wx:if="{{!readOnly && !submitted}}" class="shot-delete" catchtap="removeImage" data-id="{{item.id}}" disabled="{{saving || uploading || reloading || pendingCreationUnconfirmed}}" aria-label="删除{{item.label}}">×</button>
+        </view>
+        <button wx:if="{{!readOnly && !submitted && imageRows.length < 6}}" class="add-screenshot" bindtap="addImage" disabled="{{saving || uploading || reloading || recognizing || pendingCreationUnconfirmed}}"><text class="add-sign">+</text><text>{{uploading ? '正在上传' : imageRows.length ? '继续添加' : '添加截图'}}</text></button>
+      </view>
+      <view wx:if="{{recognitionCount && !recognizing}}" class="recognition-done">
+        <view class="recognition-done-heading"><text>✓ 已识别 {{recognitionCount}} 项并填入表单</text><button class="undo-recognition" bindtap="undoRecognition" disabled="{{saving || readOnly || pendingCreationUnconfirmed}}">撤销</button></view>
+        <view class="recognition-chips"><text wx:for="{{recognitionChips}}" wx:key="id" class="recognition-chip">{{item.label}}</text></view>
+        <text class="recognition-help">识别结果已填入表单并标注「识别」，请逐项核对。点击截图可查看识别位置。</text>
+        <text wx:if="{{!recognizedFields.entrance}}" class="recognition-missing">未识别到入口路径，请补充入口页截图或手动填写。</text>
+        <text wx:if="{{recognitionDemo}}" class="recognition-help">演示模式：识别结果为模拟数据。</text>
+      </view>
+      <button wx:if="{{!readOnly && !submitted && pendingRecognitionCount && !recognizing}}" class="recognize-button" bindtap="recognizeImages" disabled="{{saving || uploading || reloading || pendingCreationUnconfirmed}}"><view class="recognize-icon" aria-hidden="true"><view /></view><view class="recognize-copy"><text class="recognize-title">{{recognizedImages.length ? '识别新增的 ' + pendingRecognitionCount + ' 张' : '识别截图并填写'}}</text><text class="recognize-sub">{{recognizedImages.length ? '仅填写空白项，不覆盖已填内容' : '自动提取银行、活动名称、奖励、活动时间与重置周期'}}</text></view><text class="recognize-arrow">›</text></button>
+      <view wx:if="{{recognizing}}" class="recognizing"><view class="recognition-spinner" /><view class="recognize-copy"><text class="recognize-title">正在识别 {{pendingRecognitionCount}} 张截图…</text><text class="recognize-sub">正在提取银行、活动名称、奖励、活动时间与重置周期</text></view></view>
+      <text wx:if="{{errors.imageIds || imageError}}" class="field-error">{{errors.imageIds || imageError}}</text><button wx:if="{{imageError && imageRows.length}}" class="text-button" bindtap="loadImages" disabled="{{loadingImages || uploading}}">重新读取图片</button>
     </view>
-    <view wx:if="{{submitted}}" class="status-notice">
-      <text class="notice-title">线索已提交审核</text>
-      <text>运营会核实你提供的来源，补齐规则后再公开。</text>
-      <button class="text-button" bindtap="viewSubmissions">查看我的投稿</button>
-    </view>
-    <view wx:if="{{pendingCreationUnconfirmed && !saving && !submitted}}" class="status-notice" role="status">
-      <text class="notice-title">上次提交结果尚未确认</text>
-      <text>内容暂时锁定。重试会确认原来的提交，确认后可到“我的投稿”继续修改。</text>
-      <button class="text-button" bindtap="viewSubmissions">去我的投稿核对</button>
-    </view>
-    <view wx:if="{{!submitted && submission.status === 'pending'}}" class="status-notice">
-      <text class="notice-title">等待运营核实</text>
-      <text>线索已进入审核，你仍可以补充来源或更正内容。</text>
-    </view>
-    <view wx:if="{{!submitted && submission.status === 'returned'}}" class="return-notice">
-      <text class="notice-title">请补充这些信息</text>
-      <text>{{submission.reviewNote}}</text>
-    </view>
-    <view wx:if="{{submission.status === 'published'}}" class="status-notice">
-      <text class="notice-title">已审核发布</text>
-      <button wx:if="{{submission.activityId}}" class="text-button" bindtap="viewActivity">查看公开活动</button>
-    </view>
-    <text wx:if="{{!readOnly && !submitted}}" class="draft-status">{{localDraftStatus || (submissionId ? '修改自动存为本机草稿，提交后更新' : '自动存为本机草稿，提交后进入审核')}}</text>
-    <view wx:if="{{error || conflict}}" class="error-banner">
-      <text>{{error || '线索已有更新，请读取最新版本。'}}</text>
-      <button wx:if="{{fullSubmission}}" class="text-button" bindtap="viewFullSubmission" disabled="{{saving || uploading || reloading || pendingCreationUnconfirmed}}">查看完整投稿</button>
-      <button wx:elif="{{conflict}}" class="text-button" bindtap="reloadLatest" loading="{{reloading}}" disabled="{{saving || uploading || reloading || pendingCreationUnconfirmed}}">{{reloading ? '正在读取' : '读取最新线索'}}</button>
-    </view>
-
-    <view class="form-section">
-      <text class="section-title">活动信息</text>
-      <view class="field" id="field-bankId">
-        <text class="field-label">所属银行（必填）</text>
-        <picker range="{{bankOptions}}" range-key="name" value="{{bankIndex}}" bindchange="selectBank" disabled="{{readOnly || saving || submitted || reloading || pendingCreationUnconfirmed}}" aria-label="所属银行">
-          <view class="picker-field {{!lead.bankId ? 'placeholder' : ''}}">{{bankOptions[bankIndex].name}}<text aria-hidden="true">⌄</text></view>
-        </picker>
+    <view class="form-section information-section"><text class="section-title">活动信息</text>
+      <view class="field" id="field-bankId"><view class="label-row"><text class="field-label">所属银行（必填）</text><text wx:if="{{recognizedFields.bankId}}" class="recognized-badge">识别</text></view>
+        <view wx:if="{{!selectedBank || bankGridOpen || !recognizedFields.bankId}}" class="bank-grid"><button wx:for="{{bankGrid}}" wx:key="id" class="bank-option {{lead.bankId === item.id ? 'selected' : ''}}" bindtap="selectBank" data-id="{{item.id}}" disabled="{{readOnly || saving || submitted || reloading || pendingCreationUnconfirmed}}"><image src="{{item.logo}}" mode="aspectFit" /><text>{{item.shortName}}</text></button></view>
+        <view wx:else class="selected-bank recognized-input"><image src="{{selectedBank.logo}}" mode="aspectFit" /><text>{{selectedBank.name}}</text><button bindtap="openBanks" disabled="{{readOnly || saving || submitted || reloading || pendingCreationUnconfirmed}}">更换</button></view>
         <text wx:if="{{errors.bankId}}" class="field-error">{{errors.bankId}}</text>
       </view>
-      <view class="field" id="field-title">
-        <label for="title" class="field-label">活动名称（必填）</label>
-        <input id="title" value="{{lead.title}}" data-field="title" bindinput="input" maxlength="60" placeholder="例如：周末餐饮消费返现" disabled="{{readOnly || saving || submitted || reloading || pendingCreationUnconfirmed}}" />
-        <text wx:if="{{errors.title}}" class="field-error">{{errors.title}}</text>
-      </view>
+      <view class="field" id="field-title"><view class="label-row"><label for="title" class="field-label">活动名称（必填）</label><text wx:if="{{recognizedFields.title}}" class="recognized-badge">识别</text></view><input id="title" class="{{recognizedFields.title ? 'recognized-input' : ''}}" value="{{lead.title}}" data-field="title" bindinput="input" maxlength="60" placeholder="例如：周末餐饮消费返现" disabled="{{readOnly || saving || submitted || reloading || pendingCreationUnconfirmed}}" /><view wx:if="{{suggestedTitle}}" class="title-suggestion"><text>截图中的活动名称为「{{suggestedTitle}}」</text><button bindtap="adoptSuggestedTitle" disabled="{{readOnly || saving || pendingCreationUnconfirmed}}">采用</button></view><text wx:if="{{errors.title}}" class="field-error">{{errors.title}}</text></view>
     </view>
-
-    <view class="form-section">
-      <text class="section-title">规则来源 · 任选一种</text>
-      <text class="section-copy">提供链接、银行 App 路径或截图，也可同时补充多种来源。</text>
-      <view class="field" id="field-sourceUrl">
-        <label for="sourceUrl" class="field-label">来源链接</label>
-        <input id="sourceUrl" value="{{lead.sourceUrl}}" data-field="sourceUrl" bindinput="input" maxlength="2048" placeholder="https://，没有链接可以留空" disabled="{{readOnly || saving || submitted || reloading || pendingCreationUnconfirmed}}" />
-        <text wx:if="{{errors.sourceUrl}}" class="field-error">{{errors.sourceUrl}}</text>
-      </view>
-      <view class="field" id="field-sourceNote">
-        <label for="sourceNote" class="field-label">出处说明或银行 App 路径</label>
-        <textarea id="sourceNote" value="{{lead.sourceNote}}" data-field="sourceNote" bindinput="input" maxlength="500" auto-height placeholder="例如：银行 App → 信用卡 → 优惠活动 → 周末餐饮。也可以补充你看到的活动规则。" disabled="{{readOnly || saving || submitted || reloading || pendingCreationUnconfirmed}}" />
-        <text wx:if="{{errors.sourceNote}}" class="field-error">{{errors.sourceNote}}</text>
-      </view>
-      <button wx:if="{{lead.sourceUrl || lead.sourceNote}}" class="copy-button" bindtap="copySource">复制来源内容</button>
-      <view class="field image-field" id="field-imageIds">
-        <text class="field-label">规则截图{{imageRows.length ? '（' + imageRows.length + '/6）' : '（最多 6 张）'}}</text>
-        <text wx:if="{{!readOnly && !submitted}}" class="field-hint">请保留活动名称、规则与出处，裁掉姓名、卡号等个人信息。</text>
-        <view wx:for="{{imageRows}}" wx:key="id" class="image-row">
-          <button class="image-preview" bindtap="previewImage" data-id="{{item.id}}" disabled="{{loadingImages}}" aria-label="查看{{item.label}}">
-            <image wx:if="{{item.url}}" class="image-thumbnail" src="{{item.url}}" mode="aspectFill" aria-label="{{item.label}}" />
-            <text class="image-label">{{item.label}}</text>
-            <text class="image-status">{{loadingImages ? '读取中' : '查看'}}</text>
-          </button>
-          <button wx:if="{{!readOnly && !submitted}}" class="remove-image" bindtap="removeImage" data-id="{{item.id}}" disabled="{{saving || uploading || reloading || pendingCreationUnconfirmed}}" aria-label="移除{{item.label}}">移除</button>
+    <view class="form-section rule-section" id="field-rules"><button class="rules-heading" bindtap="toggleRules"><view><text class="section-title">规则信息（选填）</text><text class="section-copy {{recognitionCount ? 'recognized-copy' : ''}}">{{recognitionCount ? '已从截图识别，请核对' : '奖励、重置周期、活动时间与参与条件'}}</text></view><text class="disclosure {{rulesExpanded ? 'expanded' : ''}}">⌄</text></button>
+      <view wx:if="{{rulesExpanded}}" class="rules-body">
+        <view class="field"><view class="label-row"><text class="field-label">奖励</text><text wx:if="{{recognizedFields.reward}}" class="recognized-badge">识别</text></view><view class="pills"><button wx:for="{{rewardOptions}}" wx:key="id" class="pill {{rules.rewardKind === item.id ? 'selected' : ''}}" bindtap="selectReward" data-id="{{item.id}}" disabled="{{readOnly || saving || pendingCreationUnconfirmed}}">{{item.name}}</button></view><view class="reward-input {{recognizedFields.reward ? 'recognized-input' : ''}}"><text>{{rules.rewardKind === 'gift' ? '参考价值' : '金额'}}</text><input type="{{rules.rewardKind === 'points' ? 'number' : 'digit'}}" value="{{rewardText}}" data-field="rewardText" bindinput="inputRule" maxlength="9" placeholder="{{rules.rewardKind === 'points' ? '0' : '0.00'}}" disabled="{{readOnly || saving || pendingCreationUnconfirmed}}" /><text>{{rewardUnit}}</text></view></view>
+        <view class="field"><view class="label-row"><text class="field-label">重置周期</text><text wx:if="{{recognizedFields.cycle}}" class="recognized-badge">识别</text></view><view class="cycle-control"><button wx:for="{{cycleOptions}}" wx:key="id" class="cycle-option {{cycleType === item.id ? 'selected' : ''}}" bindtap="selectCycle" data-id="{{item.id}}" disabled="{{readOnly || saving || pendingCreationUnconfirmed}}">{{item.name}}</button></view>
+          <view wx:if="{{cycleType && cycleType !== 'once'}}" class="cycle-panel">
+            <view wx:if="{{cycleType === 'week'}}"><text class="panel-label">每周几重置</text><view class="weekdays"><button wx:for="{{weekdayOptions}}" wx:key="id" class="weekday {{cycleWeekday === item.id ? 'selected' : ''}}" bindtap="selectWeekday" data-id="{{item.id}}" disabled="{{readOnly || saving || pendingCreationUnconfirmed}}">{{item.name}}</button></view></view>
+            <view wx:if="{{cycleType === 'month' || cycleType === 'custom'}}" class="stepper-row"><text>{{cycleType === 'month' ? '每月几号重置' : '重置间隔'}}</text><view class="stepper"><button bindtap="stepCycle" data-delta="-1" disabled="{{readOnly || saving || pendingCreationUnconfirmed || (cycleType === 'month' ? cycleDay <= 1 : cycleN <= 1)}}">−</button><text>{{cycleType === 'month' ? '每月 ' + cycleDay + ' 日' : '每 ' + cycleN + ' ' + intervalLabel}}</text><button bindtap="stepCycle" data-delta="1" disabled="{{readOnly || saving || pendingCreationUnconfirmed || (cycleType === 'month' ? cycleDay >= 28 : cycleN >= (cycleUnit === 'day' ? 90 : 12))}}">+</button></view></view>
+            <view wx:if="{{cycleType === 'custom'}}" class="interval-row"><text>间隔单位</text><view class="pills"><button wx:for="{{intervalOptions}}" wx:key="id" class="pill {{cycleUnit === item.id ? 'selected' : ''}}" bindtap="selectInterval" data-id="{{item.id}}" disabled="{{readOnly || saving || pendingCreationUnconfirmed}}">{{item.name}}</button></view></view><text wx:if="{{cycleType === 'custom'}}" class="cycle-anchor">{{rules.startsOn ? '从活动开始日期（' + rules.startsOn + '）起算' : '请选择活动开始日期，作为周期起算日期'}}</text><text class="cycle-preview">{{cyclePreview}}</text>
+          </view>
         </view>
-        <text wx:if="{{readOnly && !imageRows.length}}" class="field-hint">未附规则截图</text>
-        <button wx:if="{{!readOnly && !submitted && imageRows.length < 6}}" class="upload-button" bindtap="addImage" loading="{{uploading}}" disabled="{{saving || uploading || reloading || pendingCreationUnconfirmed}}">{{uploading ? '正在上传截图' : '添加规则截图'}}</button>
-        <text wx:if="{{errors.imageIds}}" class="field-error">{{errors.imageIds}}</text>
-        <text wx:if="{{imageError}}" class="field-error">{{imageError}}</text>
-        <button wx:if="{{imageError && imageRows.length}}" class="text-button" bindtap="loadImages" disabled="{{loadingImages || uploading}}">重新读取图片</button>
-      </view>
+        <view class="field"><view class="label-row"><text class="field-label">活动时间</text><text wx:if="{{recognizedFields.time}}" class="recognized-badge">识别</text></view><view class="date-pair"><picker mode="date" value="{{rules.startsOn}}" start="2025-01-01" end="2028-12-31" data-field="startsOn" bindchange="selectRuleDate" disabled="{{readOnly || saving || pendingCreationUnconfirmed}}"><view class="date-box {{recognizedFields.time ? 'recognized-input' : ''}}"><view><text class="date-label">开始日期</text><text class="date-value {{!rules.startsOn ? 'placeholder' : ''}}">{{rules.startsOn || '请选择'}}</text></view><view class="calendar-icon" /></view></picker><text class="date-to">至</text><picker mode="date" value="{{rules.endsOn}}" start="{{rules.startsOn || '2025-01-01'}}" end="2028-12-31" data-field="endsOn" bindchange="selectRuleDate" disabled="{{readOnly || saving || pendingCreationUnconfirmed}}"><view class="date-box {{recognizedFields.time ? 'recognized-input' : ''}}"><view><text class="date-label">结束日期</text><text class="date-value {{!rules.endsOn ? 'placeholder' : ''}}">{{rules.endsOn || '请选择'}}</text></view><view class="calendar-icon" /></view></picker></view></view>
+        <view class="field"><view class="label-row"><label for="conditions" class="field-label">参与条件</label><text wx:if="{{recognizedFields.conditions}}" class="recognized-badge">识别</text></view><textarea id="conditions" class="{{recognizedFields.conditions ? 'recognized-input' : ''}}" value="{{rules.conditions}}" data-field="conditions" bindinput="inputRule" maxlength="2000" placeholder="例如：单笔满 100 元计 1 笔，每期累计 3 笔" disabled="{{readOnly || saving || pendingCreationUnconfirmed}}" /></view>
+      </view><text wx:if="{{errors.rules || ruleError}}" class="field-error rule-error">{{errors.rules || ruleError}}</text>
     </view>
-    <text class="privacy-copy">审核前，线索仅对你与运营可见。发布后不会公开你的卡包、参与记录或收益。</text>
-    <button wx:if="{{!submissionId && !readOnly && !submitted}}" class="full-form-link" bindtap="fillFullRules" disabled="{{saving || uploading || reloading || pendingCreationUnconfirmed}}">填写完整规则</button>
+    <view class="form-section information-section"><view class="section-heading-copy"><text class="section-title">其他来源</text><text class="section-copy">无截图时，可提供活动链接或银行 App 内的入口路径。</text></view><view class="field" id="field-sourceUrl"><label for="sourceUrl" class="field-label">来源链接</label><input id="sourceUrl" value="{{lead.sourceUrl}}" data-field="sourceUrl" bindinput="input" maxlength="2048" placeholder="https://（选填）" disabled="{{readOnly || saving || submitted || reloading || pendingCreationUnconfirmed}}" /><text wx:if="{{errors.sourceUrl}}" class="field-error">{{errors.sourceUrl}}</text></view><view class="field" id="field-sourceNote"><view class="label-row"><label for="sourceNote" class="field-label">出处说明或 App 入口路径</label><text wx:if="{{recognizedFields.entrance}}" class="recognized-badge">识别</text></view><textarea id="sourceNote" class="{{recognizedFields.entrance ? 'recognized-input' : ''}}" value="{{lead.sourceNote}}" data-field="sourceNote" bindinput="input" maxlength="500" placeholder="例如：银行 App → 信用卡 → 优惠活动 → 活动名称" disabled="{{readOnly || saving || submitted || reloading || pendingCreationUnconfirmed}}" /><text wx:if="{{errors.sourceNote}}" class="field-error">{{errors.sourceNote}}</text></view></view>
+    <text class="privacy-copy">审核前，线索仅对你与运营可见。发布后不会公开你的卡包、参与记录或收益。</text><text wx:if="{{localDraftStatus}}" class="draft-status">{{localDraftStatus}}</text>
   </block>
 </view>
-<view wx:if="{{!loading && ready && !readOnly && !denied && !submitted}}" class="lead-dock">
-  <button class="secondary-button" bindtap="saveLocalDraft" disabled="{{saving || uploading || reloading || pendingCreationUnconfirmed}}">保存草稿</button>
-  <button class="primary-button" bindtap="save" loading="{{saving}}" disabled="{{saving || uploading || reloading || conflict || fullSubmission}}">{{saving ? '正在提交' : pendingCreationUnconfirmed ? '重试确认提交' : submission.status === 'pending' ? '更新线索' : submission.status === 'returned' ? '重新提交线索' : '提交线索'}}</button>
-</view>
+<view wx:if="{{!loading && ready && !readOnly && !denied && !submitted}}" class="lead-dock"><button class="secondary-button" bindtap="saveLocalDraft" disabled="{{saving || uploading || reloading || pendingCreationUnconfirmed || recognizing}}">保存草稿</button><button class="primary-button" bindtap="save" loading="{{saving}}" disabled="{{saving || uploading || reloading || recognizing || conflict || fullSubmission}}">{{saving ? '正在提交' : pendingCreationUnconfirmed ? '重试确认提交' : submission.status === 'pending' ? '更新线索' : submission.status === 'returned' ? '重新提交线索' : '提交线索'}}</button></view>
+<screenshot-viewer id="lead-viewer" show="{{viewerShow}}" items="{{viewerItems}}" index="{{viewerIndex}}" context="{{readOnly ? 'review' : 'form'}}" bindclose="closeViewer" binddelete="deleteViewerShot" />
